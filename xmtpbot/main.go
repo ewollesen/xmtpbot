@@ -14,6 +14,7 @@ import (
 
 	"xmtp.net/xmtpbot/discord"
 	"xmtp.net/xmtpbot/mildred"
+	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
 	urls_setup "xmtp.net/xmtpbot/urls/setup"
 )
@@ -31,8 +32,11 @@ func main() {
 	interrupt := make(chan os.Signal)
 	signal.Notify(interrupt, os.Interrupt)
 	shutdown := make(chan bool)
-	bot := discord.New(urls_setup.NewStore(), seen_setup.NewStore(),
-		mildred.New())
+	bot := discord.New(
+		urls_setup.NewStore(),
+		seen_setup.NewStore(),
+		mildred.New(),
+		remind.New())
 	var wg sync.WaitGroup
 	logger.Errore(bot.Run(shutdown, &wg))
 

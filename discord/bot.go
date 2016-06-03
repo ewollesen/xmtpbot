@@ -9,14 +9,17 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
 
 	"xmtp.net/xmtpbot/dice"
+	"xmtp.net/xmtpbot/dur"
 	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/mildred"
+	"xmtp.net/xmtpbot/remind"
 	"xmtp.net/xmtpbot/seen"
 	"xmtp.net/xmtpbot/urls"
 )
@@ -34,14 +37,17 @@ type bot struct {
 	user_id           string
 	urls              urls.Store
 	mildred           mildred.Conn
+	remind            remind.Remind
 }
 
-func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn) *bot {
+func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
+	remind remind.Remind) *bot {
 
 	return &bot{
 		seen:    seen_store,
 		urls:    urls_store,
 		mildred: mildred,
+		remind:  remind,
 	}
 }
 
@@ -149,6 +155,8 @@ func (b *bot) handleCommand(cmd Command) string {
 		return b.nowPlaying()
 	case "ping":
 		return "pong"
+	case "remind":
+		return b.setReminder(cmd)
 	case "roll":
 		return dice.Roll(cmd.args)
 	case "seen":
@@ -179,6 +187,7 @@ type Command struct {
 	cmd     string
 	args    string
 	session *discordgo.Session
+	message *discordgo.Message
 }
 
 func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -197,6 +206,7 @@ func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			cmd:     args[0][1:],
 			args:    args[1],
 			session: s,
+			message: m.Message,
 		})
 	}
 
@@ -275,4 +285,22 @@ func (b *bot) nowPlaying() string {
 	} else {
 		return "error determining current song"
 	}
+}
+
+func (b *bot) setReminder(cmd Command) string {
+	duration, matched, err := dur.Parse(cmd.args)
+	if err != nil {
+		return "couldn't parse reminder duration"
+	}
+	msg := cmd.args[len(matched):]
+
+	b.remind.Set(time.Now().Add(*duration), func() {
+		msg := fmt.Sprintf("<@%s> reminder: %s",
+			cmd.message.Author.ID, msg)
+		_, err := cmd.session.ChannelMessageSend(cmd.message.ChannelID,
+			msg)
+		logger.Warne(err)
+	})
+
+	return "reminder set"
 }
