@@ -122,59 +122,63 @@ func (b *bot) addHandlers(session *discordgo.Session, shutdown chan bool) (
 	return nil
 }
 
-func (b *bot) handleCommand(cmd string, args ...string) string {
-	arg_string := strings.Join(args, " ")
-
-	switch cmd {
+func (b *bot) handleCommand(cmd Command) string {
+	switch cmd.cmd {
 	case "dice":
-		return dice.Roll(strings.Join(args, " "))
+		return dice.Roll(cmd.args)
 	case "faq":
 		return "No FAQs answered yet"
 	case "idle":
-		if arg_string == "" {
+		if cmd.args == "" {
 			return "No name specified"
 		}
 
-		since, err := b.seen.Idle(arg_string)
+		since, err := b.seen.Idle(cmd.args)
 		if err != nil {
 			return fmt.Sprintf("error retrieving idle for %q",
-				arg_string)
+				cmd.args)
 		}
 		if since == nil {
 			return fmt.Sprintf("No idle record for %q found",
-				arg_string)
+				cmd.args)
 		}
-		return fmt.Sprintf("%s idle for %s", arg_string, since)
+		return fmt.Sprintf("%s idle for %s", cmd.args, since)
 	case "link":
-		return b.lookupURL(arg_string)
+		return b.lookupURL(cmd.args)
 	case "np":
 		return b.nowPlaying()
 	case "ping":
 		return "pong"
 	case "roll":
-		return dice.Roll(arg_string)
+		return dice.Roll(cmd.args)
 	case "seen":
-		if arg_string == "" {
+		if cmd.args == "" {
 			return "No name specified"
 		}
 
-		at, err := b.seen.LastSeen(arg_string)
+		at, err := b.seen.LastSeen(cmd.args)
 		if err != nil {
 			return fmt.Sprintf("error retrieving last seen for %q",
-				arg_string)
+				cmd.args)
 		}
 		if at == nil {
 			return fmt.Sprintf("No seen record for %q found",
-				arg_string)
+				cmd.args)
 		}
-		return fmt.Sprintf("%s was last seen %s", arg_string, at)
+		return fmt.Sprintf("%s was last seen %s", cmd.args, at)
 	case "syn":
 		return "ack"
 	case "url":
-		return b.lookupURL(arg_string)
+		return b.lookupURL(cmd.args)
 	default:
-		return fmt.Sprintf("unhandled command: %q", cmd)
+		return fmt.Sprintf("unhandled command: %q", cmd.cmd)
 	}
+}
+
+type Command struct {
+	cmd     string
+	args    string
+	session *discordgo.Session
 }
 
 func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -188,10 +192,12 @@ func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	response := ""
 
 	if strings.HasPrefix(m.Content, "!") {
-		args := strings.Split(m.Content, " ")
-		cmd := args[0][1:]
-		args = args[1:]
-		response = b.handleCommand(cmd, args...)
+		args := strings.SplitN(m.Content, " ", 2)
+		response = b.handleCommand(Command{
+			cmd:     args[0][1:],
+			args:    args[1],
+			session: s,
+		})
 	}
 
 	urls := b.parseURLs(m.Content)
