@@ -21,7 +21,9 @@ import (
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	"xmtp.net/xmtpbot/seen"
+	"xmtp.net/xmtpbot/twitch"
 	"xmtp.net/xmtpbot/urls"
+	"xmtp.net/xmtpbot/util"
 )
 
 var (
@@ -38,16 +40,18 @@ type bot struct {
 	urls              urls.Store
 	mildred           mildred.Conn
 	remind            remind.Remind
+	twitch_client     twitch.Twitch
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
-	remind remind.Remind) *bot {
+	remind remind.Remind, twitch twitch.Twitch) *bot {
 
 	return &bot{
-		seen:    seen_store,
-		urls:    urls_store,
-		mildred: mildred,
-		remind:  remind,
+		seen:          seen_store,
+		urls:          urls_store,
+		mildred:       mildred,
+		remind:        remind,
+		twitch_client: twitch,
 	}
 }
 
@@ -176,6 +180,8 @@ func (b *bot) handleCommand(cmd Command) string {
 		return fmt.Sprintf("%s was last seen %s", cmd.args, at)
 	case "syn":
 		return "ack"
+	case "twitch":
+		return b.twitch(cmd.args)
 	case "url":
 		return b.lookupURL(cmd.args)
 	default:
@@ -303,4 +309,67 @@ func (b *bot) setReminder(cmd Command) string {
 	})
 
 	return "reminder set"
+}
+
+func (b *bot) twitch(args string) string {
+	pieces := strings.SplitN(args, " ", 2)
+	cmd := pieces[0]
+	if len(pieces) > 1 {
+		args = pieces[1]
+	} else {
+		args = ""
+	}
+	client := b.twitch_client
+
+	switch cmd {
+	case "live":
+		var response []string
+		streams, err := client.Live()
+		if err != nil {
+			logger.Errore(err)
+			return "error retrieving live twitch streams"
+		}
+		for _, stream := range streams {
+			response = append(response,
+				fmt.Sprintf("%s: %s",
+					util.EscapeMarkdown(stream.Name()),
+					stream.URL()))
+		}
+		if len(response) == 0 {
+			return "no streams are live"
+		}
+		return strings.Join(response, "\n")
+	case "follow":
+		if args == "" {
+			return "must specify channel name to follow"
+		}
+		logger.Debugf("args: %s", args)
+		return client.Follow(args)
+	case "unfollow":
+		if args == "" {
+			return "must specify channel name to unfollow"
+		}
+		logger.Debugf("args: %s", args)
+		client.Unfollow(args)
+		return "OK"
+	case "following", "list":
+		var response []string
+		channels, err := client.Following()
+		if err != nil {
+			logger.Errore(err)
+			return "error retrieving followed twitch channels"
+		}
+		for _, channel := range channels {
+			response = append(response,
+				fmt.Sprintf("%s: %s",
+					util.EscapeMarkdown(channel.Name()),
+					channel.URL()))
+		}
+		if len(response) == 0 {
+			return "no channels are followed"
+		}
+		return strings.Join(response, "\n")
+	default:
+		return fmt.Sprintf("unhandled twitch command: %q", cmd)
+	}
 }

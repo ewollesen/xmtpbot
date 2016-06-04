@@ -16,6 +16,7 @@ import (
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
+	"xmtp.net/xmtpbot/twitch"
 	urls_setup "xmtp.net/xmtpbot/urls/setup"
 )
 
@@ -36,7 +37,8 @@ func main() {
 		urls_setup.NewStore(),
 		seen_setup.NewStore(),
 		mildred.New(),
-		remind.New())
+		remind.New(),
+		twitch.Setup())
 	var wg sync.WaitGroup
 	logger.Errore(bot.Run(shutdown, &wg))
 
