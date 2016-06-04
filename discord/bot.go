@@ -360,10 +360,11 @@ func (b *bot) twitch(args string) string {
 			return "error retrieving followed twitch channels"
 		}
 		for _, channel := range channels {
+			// wrapping the link in parentheses seems to prevent the
+			// discord client from expanding it?
 			response = append(response,
-				fmt.Sprintf("%s: %s",
-					util.EscapeMarkdown(channel.Name()),
-					channel.URL()))
+				fmt.Sprintf("%s (%s)",
+					util.EscapeMarkdown(channel.Name()), channel.URL()))
 		}
 		if len(response) == 0 {
 			return "no channels are followed"
