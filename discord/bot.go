@@ -208,9 +208,13 @@ func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if strings.HasPrefix(m.Content, "!") {
 		args := strings.SplitN(m.Content, " ", 2)
+		new_args := ""
+		if len(args) > 1 {
+			new_args = args[1]
+		}
 		response = b.handleCommand(Command{
 			cmd:     args[0][1:],
-			args:    args[1],
+			args:    new_args,
 			session: s,
 			message: m.Message,
 		})
@@ -222,12 +226,32 @@ func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if response != "" {
-		_, err := s.ChannelMessageSend(m.ChannelID, response)
-		if err != nil {
-			logger.Warne(err)
+		for _, chunk := range splitResponse(response, 10) {
+			_, err := s.ChannelMessageSend(m.ChannelID, chunk)
+			if err != nil {
+				logger.Warne(err)
+			}
 		}
 	}
 
+}
+
+func splitResponse(response string, num_lines int) (chunks []string) {
+	lines := strings.Split(response, "\n")
+	chunk := []string{lines[0]}
+	for i := 1; i < len(lines); i++ {
+		if len(chunk) >= num_lines {
+			chunks = append(chunks, strings.Join(chunk, "\n"))
+			chunk = []string{}
+		}
+		chunk = append(chunk, lines[i])
+	}
+
+	if len(chunk) > 0 {
+		chunks = append(chunks, strings.Join(chunk, "\n"))
+	}
+
+	return chunks
 }
 
 func (b *bot) myDiscordUserId(s *discordgo.Session) string {
@@ -354,7 +378,7 @@ func (b *bot) twitch(args string) string {
 		return "OK"
 	case "following", "list":
 		var response []string
-		channels, err := client.Following()
+		channels, err := client.Following(args)
 		if err != nil {
 			logger.Errore(err)
 			return "error retrieving followed twitch channels"
@@ -366,7 +390,8 @@ func (b *bot) twitch(args string) string {
 				fmt.Sprintf("%s (%s)",
 					util.EscapeMarkdown(channel.Name()), channel.URL()))
 		}
-		if len(response) == 0 {
+
+		if len(channels) == 0 {
 			return "no channels are followed"
 		}
 		return strings.Join(response, "\n")

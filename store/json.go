@@ -77,7 +77,7 @@ func (s *jsonStore) flush() (err error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	bytes, err := json.Marshal(s.mem)
+	bytes, err := json.MarshalIndent(s.mem, "", "  ")
 	if err != nil {
 		return err
 	}

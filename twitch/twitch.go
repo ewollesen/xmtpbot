@@ -32,7 +32,7 @@ var (
 )
 
 type Twitch interface {
-	Following() ([]Channel, error)
+	Following(name string) ([]Channel, error)
 	Live() ([]Stream, error)
 	Follow(names ...string) string
 	Unfollow(names ...string)
@@ -40,7 +40,6 @@ type Twitch interface {
 
 type twitch struct {
 	channel_store store.Simple
-	channelNames  map[string]bool
 }
 
 type Channel interface {
@@ -125,14 +124,70 @@ func New(store store.Simple) Twitch {
 	}
 }
 
-func (t *twitch) Following() (channels []Channel, err error) {
+func (t *twitch) Following(name string) (channels []Channel, err error) {
+	if name == "" {
+		return t.followingFromStore()
+	} else {
+		return t.followingByName(name)
+	}
+}
+
+func (t *twitch) followingFromStore() (channels []Channel, err error) {
 	t.channel_store.Iterate(func(key, value string) {
-		tc, err := t.getChannel(key)
-		if err != nil {
-			return
+		if value == "" {
+			logger.Debugf("retrieving channel info for %q", key)
+			tc, err := t.getChannel(key)
+			if err != nil {
+				return
+			}
+			channels = append(channels, &channel{tc: tc})
+		} else {
+			logger.Debugf("using cached channel info for %q", key)
+			channels = append(channels, &channel{tc: &twitchChannel{
+				DisplayName: key,
+				URL:         value,
+			}})
 		}
-		channels = append(channels, &channel{tc: tc})
 	})
+	sort.Sort(ChannelByName(channels))
+
+	return channels, nil
+}
+
+func (t *twitch) followingByName(name string) (channels []Channel, err error) {
+	url, err := t.twitchURL("users/%s/follows/channels", name)
+	if err != nil {
+		return nil, err
+	}
+	// TODO support more than 100 links
+	url += "?limit=100"
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw_json, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		logger.Debugf("raw json response: %s", string(raw_json))
+		return nil, err
+	}
+
+	var response_structure struct {
+		Follows []struct {
+			Channel *twitchChannel `json:"channel"`
+		} `json:"follows"`
+	}
+	err = json.Unmarshal(raw_json, &response_structure)
+	if err != nil {
+		logger.Debugf("raw json response: %s", string(raw_json))
+		return nil, err
+	}
+
+	for _, resp := range response_structure.Follows {
+		channels = append(channels, &channel{tc: resp.Channel})
+	}
 
 	sort.Sort(ChannelByName(channels))
 
@@ -284,9 +339,13 @@ func Setup() Twitch {
 
 type ChannelByName []Channel
 
-func (a ChannelByName) Len() int           { return len(a) }
-func (a ChannelByName) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ChannelByName) Less(i, j int) bool { return strings.Compare(a[i].Name(), a[j].Name()) < 0 }
+func (a ChannelByName) Len() int      { return len(a) }
+func (a ChannelByName) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a ChannelByName) Less(i, j int) bool {
+	left := strings.ToLower(a[i].Name())
+	right := strings.ToLower(a[j].Name())
+	return strings.Compare(left, right) < 0
+}
 
 type StreamByUpdatedAt []Stream
 
