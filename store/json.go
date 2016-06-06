@@ -8,17 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/spacemonkeygo/spacelog"
 )
 
 const (
 	dirPerms  = 0700
 	filePerms = 0600
-)
-
-var (
-	logger = spacelog.GetLogger()
 )
 
 type jsonStore struct {

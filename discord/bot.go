@@ -346,6 +346,29 @@ func (b *bot) twitch(args string) string {
 	client := b.twitch_client
 
 	switch cmd {
+	case "auth":
+		auth_url, err := client.Auth(args)
+		if err != nil {
+			return "error generating OAuth2 URL"
+		}
+		return fmt.Sprintf(
+			"Visit %s to authorize the xMTP bot application, then run command %q",
+			auth_url, fmt.Sprintf("!twitch auth-code %s <code>", args))
+	case "auth-code":
+		pieces := strings.SplitN(args, " ", 2)
+		err := client.AuthCode(pieces[0], pieces[1])
+		if err != nil {
+			return "error retrieving access token"
+		}
+		return "Authentication successful"
+	case "auth-follow":
+		pieces := strings.Split(args, " ")
+		err := client.AuthFollow(pieces[0], pieces[1:]...)
+		if err != nil {
+			logger.Errorf("error auth following: %v", err)
+			return "error auth following"
+		}
+		return "Done"
 	case "live":
 		var response []string
 		streams, err := client.Live()

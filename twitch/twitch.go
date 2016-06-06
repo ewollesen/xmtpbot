@@ -4,10 +4,12 @@ package twitch
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"path"
@@ -18,6 +20,7 @@ import (
 	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/store"
 
+	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
 )
 
@@ -27,8 +30,17 @@ var (
 	storeFilename = flag.String("twitch.store_filename",
 		path.Join(*config.Dir, "twitch.json"),
 		"filename in which to store twitch data")
+	clientId = flag.String("twitch.client_id", "",
+		"twitch app client id")
+	clientSecret = flag.String("twitch.client_secret", "",
+		"twitch app client secret")
+	redirectURI = flag.String("twitch.redirect_uri", "",
+		"oauth2 authorization redirect URI")
+	scopes = []string{"user_follows_edit"}
 
 	logger = spacelog.GetLogger()
+
+	twitchError = errors.NewClass("twitch")
 )
 
 type Twitch interface {
@@ -36,10 +48,15 @@ type Twitch interface {
 	Live() ([]Stream, error)
 	Follow(names ...string) string
 	Unfollow(names ...string)
+	Auth(name string) (auth_url string, err error)
+	AuthCode(name, code string) (err error)
+	AuthFollow(name string, names ...string) (err error)
 }
 
 type twitch struct {
 	channel_store store.Simple
+	access_codes  store.Simple
+	access_tokens store.Simple
 }
 
 type Channel interface {
@@ -118,9 +135,11 @@ type apiLinks struct {
 	Channel       string `json:"channel,omitempty"`
 }
 
-func New(store store.Simple) Twitch {
+func New(channel_store store.Simple) Twitch {
 	return &twitch{
-		channel_store: store,
+		channel_store: channel_store,
+		access_tokens: store.NewMemory(),
+		access_codes:  store.NewMemory(),
 	}
 }
 
@@ -352,3 +371,148 @@ type StreamByUpdatedAt []Stream
 func (a StreamByUpdatedAt) Len() int           { return len(a) }
 func (a StreamByUpdatedAt) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a StreamByUpdatedAt) Less(i, j int) bool { return a[i].UpdatedAt().Before(a[j].UpdatedAt()) }
+
+func (t *twitch) Auth(name string) (auth_url string, err error) {
+	base_url, err := t.twitchURL("oauth2/authorize")
+	if err != nil {
+		return "", err
+	}
+	values := make(url.Values)
+	if err != nil {
+		return "", err
+	}
+	values.Set("response_type", "code")
+	values.Set("client_id", *clientId)
+	values.Set("redirect_uri", *redirectURI)
+	values.Set("scope", strings.Join(scopes, " "))
+	state, err := randomState()
+	if err != nil {
+		return "", err
+	}
+	t.access_codes.Set(name, state)
+	values.Set("state", state)
+
+	return base_url + "?" + values.Encode(), nil
+}
+
+func (t *twitch) AuthCode(name, code string) (err error) {
+	base_url, err := t.twitchURL("oauth2/token")
+	if err != nil {
+		return err
+	}
+	logger.Debugf("auth-code url: %q", base_url)
+	values := make(url.Values)
+	if err != nil {
+		return err
+	}
+	values.Set("client_id", *clientId)
+	values.Set("client_secret", *clientSecret)
+	values.Set("grant_type", "authorization_code")
+	values.Set("redirect_uri", *redirectURI)
+	values.Set("code", code)
+	state, err := t.access_codes.Get(name)
+	if err != nil {
+		return err
+	}
+	values.Set("state", state)
+
+	resp, err := http.Post(base_url+"?"+values.Encode(), "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	raw_json, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		AccessToken string   `json:"access_token"`
+		Scope       []string `json:"scope"`
+	}
+	err = json.Unmarshal(raw_json, &response)
+	if err != nil {
+		return err
+	}
+
+	logger.Debugf("raw_json: %s", string(raw_json))
+	logger.Debugf("response: %+v", response)
+	if response.AccessToken == "" {
+		return twitchError.New("no access token in twitch response!")
+	}
+
+	err = t.access_tokens.Set(name, response.AccessToken)
+	if err != nil {
+		return err
+	}
+
+	err = t.access_codes.Del(name)
+	if err != nil {
+		return err
+	}
+
+	// {
+	// 	"access_token": "[user access token]",
+	// 	"scope":[array of requested scopes]
+	// }
+
+	return nil
+
+	// client_id=[your client ID]
+	// &client_secret=[your client secret]
+	// &grant_type=authorization_code
+	// &redirect_uri=[your registered redirect URI]
+	// &code=[code received from redirect URI]
+	// &state=[your provided unique token]
+}
+
+func randomState() (state string, err error) {
+	buf := make([]byte, 64)
+	_, err = rand.Read(buf)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.URLEncoding.EncodeToString(buf), nil
+}
+
+func (t *twitch) AuthFollow(user string, names ...string) (err error) {
+	token, err := t.access_tokens.Get(user)
+	if err != nil {
+		return err
+	}
+	logger.Debugf("token: %q", token)
+
+	if token == "" {
+		return twitchError.New(fmt.Sprintf("unable to find twitch auth token for %q",
+			user))
+	}
+	for _, name := range names {
+		base_url, err := t.twitchURL("users/%s/follows/channels/%s",
+			user, name)
+		if err != nil {
+			return err
+		}
+		logger.Debugf("url: %q", base_url)
+		req, err := http.NewRequest("PUT", base_url, nil)
+		req.Header.Add("Authorization", fmt.Sprintf("OAuth %s", token))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			msg, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			return twitchError.New(fmt.Sprintf("%d: %s", resp.StatusCode, msg))
+		}
+
+		logger.Debugf("successfully auth-followed %q", name)
+	}
+
+	return nil
+}
