@@ -43,20 +43,56 @@ type bot struct {
 	remind            remind.Remind
 	twitch_client     twitch.Twitch
 	http_server       http_server.Server
+	commands_mtx      sync.Mutex
+	commands          map[string]CommandHandler
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	remind remind.Remind, twitch twitch.Twitch,
 	http_server http_server.Server) *bot {
 
-	return &bot{
+	b := &bot{
 		seen:          seen_store,
 		urls:          urls_store,
 		mildred:       mildred,
 		remind:        remind,
 		twitch_client: twitch,
 		http_server:   http_server,
+		commands:      make(map[string]CommandHandler),
 	}
+
+	b.RegisterCommand("commands", simpleCommand(b.listCommands,
+		"list available commands"))
+	b.RegisterCommand("faq", staticCommand("No FAQs answered yet",
+		"frequently answered questions"))
+	b.RegisterCommand("help", simpleCommand(b.help,
+		"list available commands"))
+	b.RegisterCommand("idle", &commandHandler{
+		help:    "reports a user's idle time",
+		handler: b.idle,
+	})
+	b.RegisterCommand("link", simpleCommand(b.lookupURL,
+		"search for a previously posted URL"))
+	b.RegisterCommand("np", simpleCommand(b.nowPlaying,
+		"report Mildred's currently playing track"))
+	b.RegisterCommand("ping", staticCommand("pong", "pong"))
+	b.RegisterCommand("remind", &commandHandler{
+		help: "sets a reminder. " +
+			"Example !remind 5 minutes take out the trash",
+		handler: b.setReminder,
+	})
+	b.RegisterCommand("roll", simpleCommand(dice.Roll, "roll some dice"))
+	b.RegisterCommand("seen", &commandHandler{
+		help:    "reports when a user was last seen",
+		handler: b.lastSeen,
+	})
+	b.RegisterCommand("syn", staticCommand("ack", "ack"))
+	b.RegisterCommand("twitch", simpleCommand(b.twitch,
+		"interact with twitch. Run \"!twitch help\" for more info"))
+	b.RegisterCommand("url", simpleCommand(b.lookupURL,
+		"search for a previously posted URL"))
+
+	return b
 }
 
 func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
@@ -144,60 +180,13 @@ func (b *bot) addHandlers(session *discordgo.Session, shutdown chan bool) (
 }
 
 func (b *bot) handleCommand(cmd Command) string {
-	switch cmd.cmd {
-	case "dice":
-		return dice.Roll(cmd.args)
-	case "faq":
-		return "No FAQs answered yet"
-	case "idle":
-		if cmd.args == "" {
-			return "No name specified"
-		}
-
-		since, err := b.seen.Idle(cmd.args)
-		if err != nil {
-			return fmt.Sprintf("error retrieving idle for %q",
-				cmd.args)
-		}
-		if since == nil {
-			return fmt.Sprintf("No idle record for %q found",
-				cmd.args)
-		}
-		return fmt.Sprintf("%s idle for %s", cmd.args, since)
-	case "link":
-		return b.lookupURL(cmd.args)
-	case "np":
-		return b.nowPlaying()
-	case "ping":
-		return "pong"
-	case "remind":
-		return b.setReminder(cmd)
-	case "roll":
-		return dice.Roll(cmd.args)
-	case "seen":
-		if cmd.args == "" {
-			return "No name specified"
-		}
-
-		at, err := b.seen.LastSeen(cmd.args)
-		if err != nil {
-			return fmt.Sprintf("error retrieving last seen for %q",
-				cmd.args)
-		}
-		if at == nil {
-			return fmt.Sprintf("No seen record for %q found",
-				cmd.args)
-		}
-		return fmt.Sprintf("%s was last seen %s", cmd.args, at)
-	case "syn":
-		return "ack"
-	case "twitch":
-		return b.twitch(cmd.args)
-	case "url":
-		return b.lookupURL(cmd.args)
-	default:
-		return fmt.Sprintf("unhandled command: %q", cmd.cmd)
+	handler, ok := b.commands[cmd.cmd]
+	if ok {
+		handler.Handle(cmd)
+		return "" // TODO fixme ugly
 	}
+
+	return fmt.Sprintf("unhandled command: %q", cmd.cmd)
 }
 
 type Command struct {
@@ -205,6 +194,11 @@ type Command struct {
 	args    string
 	session *discordgo.Session
 	message *discordgo.Message
+}
+
+func (c *Command) Reply(msg string) (err error) {
+	_, err = c.session.ChannelMessageSend(c.message.ChannelID, msg)
+	return err
 }
 
 func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -319,7 +313,7 @@ func (b *bot) lookupURL(msg string) string {
 	return "No matching URLs found"
 }
 
-func (b *bot) nowPlaying() string {
+func (b *bot) nowPlaying(args string) string {
 	cs := b.mildred.CurrentSong()
 	if cs != nil {
 		return cs.String()
@@ -328,10 +322,46 @@ func (b *bot) nowPlaying() string {
 	}
 }
 
-func (b *bot) setReminder(cmd Command) string {
+func (b *bot) idle(cmd Command) error {
+	if cmd.args == "" {
+		return cmd.Reply("No name specified")
+	}
+
+	since, err := b.seen.Idle(cmd.args)
+	if err != nil {
+		return cmd.Reply(fmt.Sprintf("Error retrieving idle for %q",
+			cmd.args))
+	}
+	if since == nil {
+		return cmd.Reply(fmt.Sprintf("No idle record for %q found",
+			cmd.args))
+	}
+
+	return cmd.Reply(fmt.Sprintf("%s idle for %s", cmd.args, since))
+}
+
+func (b *bot) lastSeen(cmd Command) error {
+	if cmd.args == "" {
+		return cmd.Reply("No name specified")
+	}
+
+	at, err := b.seen.LastSeen(cmd.args)
+	if err != nil {
+		return cmd.Reply(fmt.Sprintf("Error retrieving last seen for %q",
+			cmd.args))
+	}
+	if at == nil {
+		return cmd.Reply(fmt.Sprintf("No seen record for %q found",
+			cmd.args))
+	}
+
+	return cmd.Reply(fmt.Sprintf("%s was last seen %s", cmd.args, at))
+}
+
+func (b *bot) setReminder(cmd Command) error {
 	duration, matched, err := dur.Parse(cmd.args)
 	if err != nil {
-		return "couldn't parse reminder duration"
+		return cmd.Reply("couldn't parse reminder duration")
 	}
 	msg := cmd.args[len(matched):]
 
@@ -343,7 +373,7 @@ func (b *bot) setReminder(cmd Command) string {
 		logger.Warne(err)
 	})
 
-	return "reminder set"
+	return cmd.Reply("reminder set")
 }
 
 func (b *bot) twitch(args string) string {
@@ -424,4 +454,79 @@ func (b *bot) twitch(args string) string {
 	default:
 		return fmt.Sprintf("unhandled twitch command: %q", cmd)
 	}
+}
+
+type CommandHandler interface {
+	Handle(Command) error
+	Help() string
+}
+
+type commandHandler struct {
+	help    string
+	handler func(Command) error
+}
+
+func (h *commandHandler) Help() string {
+	return h.help
+}
+
+func (h *commandHandler) Handle(cmd Command) (err error) {
+	return h.handler(cmd)
+}
+
+func (b *bot) RegisterCommand(name string, handler CommandHandler) (err error) {
+	b.commands_mtx.Lock()
+	defer b.commands_mtx.Unlock()
+
+	b.commands[name] = handler
+
+	return nil
+}
+
+func staticCommand(response, help string) CommandHandler {
+	return &commandHandler{
+		help: help,
+		handler: func(cmd Command) error {
+			return cmd.Reply(response)
+		},
+	}
+}
+
+func simpleCommand(fn func(args string) string, help string) CommandHandler {
+	return &commandHandler{
+		help: help,
+		handler: func(cmd Command) error {
+			return cmd.Reply(fn(cmd.args))
+		},
+	}
+}
+
+func (b *bot) help(cmd string) string {
+	if cmd == "" {
+		return "usage: help <command>"
+	}
+
+	b.commands_mtx.Lock()
+	ch, ok := b.commands[cmd]
+	b.commands_mtx.Unlock()
+
+	if !ok {
+		return fmt.Sprintf("No help for %q found", cmd)
+	}
+
+	return fmt.Sprintf("%s: %s", cmd, ch.Help())
+}
+
+func (b *bot) listCommands(cmd string) string {
+	b.commands_mtx.Lock()
+	cmds := b.commands
+	b.commands_mtx.Unlock()
+
+	var strs []string
+	for name, _ := range cmds {
+		strs = append(strs, name)
+	}
+	sort.Strings(strs)
+
+	return strings.Join(strs, ", ")
 }
