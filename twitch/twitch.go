@@ -20,6 +20,7 @@ import (
 	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/store"
 
+	"github.com/gorilla/mux"
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
 )
@@ -40,7 +41,7 @@ var (
 
 	logger = spacelog.GetLogger()
 
-	twitchError = errors.NewClass("twitch")
+	Error = errors.NewClass("twitch")
 )
 
 type Twitch interface {
@@ -49,8 +50,8 @@ type Twitch interface {
 	Follow(names ...string) string
 	Unfollow(names ...string)
 	Auth(name string) (auth_url string, err error)
-	AuthCode(name, code string) (err error)
 	AuthFollow(name string, names ...string) (err error)
+	ReceiveRouter(*mux.Router) error
 }
 
 type twitch struct {
@@ -389,18 +390,17 @@ func (t *twitch) Auth(name string) (auth_url string, err error) {
 	if err != nil {
 		return "", err
 	}
-	t.access_codes.Set(name, state)
+	t.access_codes.Set(state, name)
 	values.Set("state", state)
 
 	return base_url + "?" + values.Encode(), nil
 }
 
-func (t *twitch) AuthCode(name, code string) (err error) {
+func (t *twitch) requestAuthToken(name, code string) (err error) {
 	base_url, err := t.twitchURL("oauth2/token")
 	if err != nil {
 		return err
 	}
-	logger.Debugf("auth-code url: %q", base_url)
 	values := make(url.Values)
 	if err != nil {
 		return err
@@ -436,10 +436,8 @@ func (t *twitch) AuthCode(name, code string) (err error) {
 		return err
 	}
 
-	logger.Debugf("raw_json: %s", string(raw_json))
-	logger.Debugf("response: %+v", response)
 	if response.AccessToken == "" {
-		return twitchError.New("no access token in twitch response!")
+		return Error.New("no access token in twitch response!")
 	}
 
 	err = t.access_tokens.Set(name, response.AccessToken)
@@ -452,19 +450,7 @@ func (t *twitch) AuthCode(name, code string) (err error) {
 		return err
 	}
 
-	// {
-	// 	"access_token": "[user access token]",
-	// 	"scope":[array of requested scopes]
-	// }
-
 	return nil
-
-	// client_id=[your client ID]
-	// &client_secret=[your client secret]
-	// &grant_type=authorization_code
-	// &redirect_uri=[your registered redirect URI]
-	// &code=[code received from redirect URI]
-	// &state=[your provided unique token]
 }
 
 func randomState() (state string, err error) {
@@ -485,7 +471,7 @@ func (t *twitch) AuthFollow(user string, names ...string) (err error) {
 	logger.Debugf("token: %q", token)
 
 	if token == "" {
-		return twitchError.New(fmt.Sprintf("unable to find twitch auth token for %q",
+		return Error.New(fmt.Sprintf("unable to find twitch auth token for %q",
 			user))
 	}
 	for _, name := range names {
@@ -508,11 +494,58 @@ func (t *twitch) AuthFollow(user string, names ...string) (err error) {
 			if err != nil {
 				return err
 			}
-			return twitchError.New(fmt.Sprintf("%d: %s", resp.StatusCode, msg))
+			return Error.New(fmt.Sprintf("%d: %s", resp.StatusCode, msg))
 		}
 
 		logger.Debugf("successfully auth-followed %q", name)
 	}
 
 	return nil
+}
+
+func (t *twitch) ReceiveRouter(router *mux.Router) (err error) {
+	router.HandleFunc("/oauth/redirect", t.oauthRedirect)
+
+	return nil
+}
+
+func (t *twitch) oauthRedirect(w http.ResponseWriter, req *http.Request) {
+	values, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf("%s", err)))
+		return
+	}
+	code := values.Get("code")
+	if code == "" {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to get auth code"))
+		return
+	}
+	name, err := t.access_codes.Get(values.Get("state"))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("error retrieving auth state\n"))
+		logger.Errore(err)
+		return
+	}
+	if name == "" {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("auth state not found\n"))
+		return
+	}
+
+	err = t.requestAuthToken(name, code)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("error retrieving auth token\n"))
+		logger.Errore(err)
+		return
+	}
+
+	template := "Successfully authenticated to Twitch as %q.\nYou may " +
+		"now close this window."
+	w.Write([]byte(fmt.Sprintf(template, name)))
+
+	// TODO follow up with a message in discord?
 }

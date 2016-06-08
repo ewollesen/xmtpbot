@@ -13,6 +13,7 @@ import (
 	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
 
 	"xmtp.net/xmtpbot/discord"
+	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
@@ -33,12 +34,15 @@ func main() {
 	interrupt := make(chan os.Signal)
 	signal.Notify(interrupt, os.Interrupt)
 	shutdown := make(chan bool)
+	http_server := http_server.New()
+
 	bot := discord.New(
 		urls_setup.NewStore(),
 		seen_setup.NewStore(),
 		mildred.New(),
 		remind.New(),
-		twitch.Setup())
+		twitch.Setup(),
+		http_server)
 	var wg sync.WaitGroup
 	logger.Errore(bot.Run(shutdown, &wg))
 

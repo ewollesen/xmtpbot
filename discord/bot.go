@@ -18,6 +18,7 @@ import (
 	"xmtp.net/xmtpbot/dice"
 	"xmtp.net/xmtpbot/dur"
 	"xmtp.net/xmtpbot/html"
+	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	"xmtp.net/xmtpbot/seen"
@@ -41,10 +42,12 @@ type bot struct {
 	mildred           mildred.Conn
 	remind            remind.Remind
 	twitch_client     twitch.Twitch
+	http_server       http_server.Server
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
-	remind remind.Remind, twitch twitch.Twitch) *bot {
+	remind remind.Remind, twitch twitch.Twitch,
+	http_server http_server.Server) *bot {
 
 	return &bot{
 		seen:          seen_store,
@@ -52,6 +55,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		mildred:       mildred,
 		remind:        remind,
 		twitch_client: twitch,
+		http_server:   http_server,
 	}
 }
 
@@ -62,6 +66,13 @@ func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
 	}
 	wg.Add(1)
 	logger.Info("online")
+
+	err = b.http_server.GiveRouter("twitch", b.twitch_client.ReceiveRouter)
+	if err != nil {
+		logger.Errore(err)
+	}
+
+	go b.http_server.Serve()
 
 	go func() {
 		<-shutdown
@@ -351,16 +362,8 @@ func (b *bot) twitch(args string) string {
 		if err != nil {
 			return "error generating OAuth2 URL"
 		}
-		return fmt.Sprintf(
-			"Visit %s to authorize the xMTP bot application, then run command %q",
-			auth_url, fmt.Sprintf("!twitch auth-code %s <code>", args))
-	case "auth-code":
-		pieces := strings.SplitN(args, " ", 2)
-		err := client.AuthCode(pieces[0], pieces[1])
-		if err != nil {
-			return "error retrieving access token"
-		}
-		return "Authentication successful"
+		return fmt.Sprintf("Click here to authorize xMTP bot to access "+
+			"your Twitch account: %s", auth_url)
 	case "auth-follow":
 		pieces := strings.Split(args, " ")
 		err := client.AuthFollow(pieces[0], pieces[1:]...)
