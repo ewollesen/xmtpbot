@@ -17,6 +17,7 @@ import (
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
+	"xmtp.net/xmtpbot/slack"
 	"xmtp.net/xmtpbot/twitch"
 	urls_setup "xmtp.net/xmtpbot/urls/setup"
 )
@@ -35,16 +36,25 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 	shutdown := make(chan bool)
 	http_server := http_server.New()
+	var wg sync.WaitGroup
 
-	bot := discord.New(
+	discord_bot := discord.New(
 		urls_setup.NewStore(),
 		seen_setup.NewStore(),
 		mildred.New(),
 		remind.New(),
 		twitch.Setup(),
 		http_server)
-	var wg sync.WaitGroup
-	logger.Errore(bot.Run(shutdown, &wg))
+	logger.Errore(discord_bot.Run(shutdown, &wg))
+
+	slack_bot := slack.New(
+		urls_setup.NewStore(),
+		seen_setup.NewStore(),
+		mildred.New(),
+		http_server)
+	logger.Errore(slack_bot.Run(shutdown, &wg))
+
+	go http_server.Serve()
 
 	select {
 	case <-interrupt:

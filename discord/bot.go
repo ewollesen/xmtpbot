@@ -124,8 +124,6 @@ func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
 		logger.Errore(err)
 	}
 
-	go b.http_server.Serve()
-
 	go func() {
 		<-shutdown
 		logger.Infof("shutting down")
