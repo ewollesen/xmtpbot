@@ -4,12 +4,10 @@ package twitch
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"path"
@@ -19,6 +17,7 @@ import (
 
 	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/store"
+	"xmtp.net/xmtpbot/util"
 
 	"github.com/gorilla/mux"
 	"github.com/spacemonkeygo/errors"
@@ -386,7 +385,7 @@ func (t *twitch) Auth(name string) (auth_url string, err error) {
 	values.Set("client_id", *clientId)
 	values.Set("redirect_uri", *redirectURI)
 	values.Set("scope", strings.Join(scopes, " "))
-	state, err := randomState()
+	state, err := util.RandomState(32)
 	if err != nil {
 		return "", err
 	}
@@ -451,16 +450,6 @@ func (t *twitch) requestAuthToken(name, code string) (err error) {
 	}
 
 	return nil
-}
-
-func randomState() (state string, err error) {
-	buf := make([]byte, 64)
-	_, err = rand.Read(buf)
-	if err != nil {
-		return "", err
-	}
-
-	return base64.URLEncoding.EncodeToString(buf), nil
 }
 
 func (t *twitch) AuthFollow(user string, names ...string) (err error) {

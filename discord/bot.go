@@ -3,8 +3,12 @@
 package discord
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"html/template"
+	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gorilla/mux"
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
 
@@ -28,7 +33,10 @@ import (
 )
 
 var (
-	token  = flag.String("discord.token", "", "Discord API token")
+	token    = flag.String("discord.token", "", "Discord bot API token")
+	clientId = flag.String("discord.client_id", "",
+		"Discord application client id")
+
 	logger = spacelog.GetLogger()
 
 	DiscordError = errors.NewClass("discord")
@@ -45,6 +53,8 @@ type bot struct {
 	http_server       http_server.Server
 	commands_mtx      sync.Mutex
 	commands          map[string]CommandHandler
+	oauth_mtx         sync.Mutex
+	oauth_states      map[string]string
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
@@ -59,6 +69,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		twitch_client: twitch,
 		http_server:   http_server,
 		commands:      make(map[string]CommandHandler),
+		oauth_states:  make(map[string]string),
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -96,12 +107,17 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 }
 
 func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
-	session, err := b.logIn(shutdown)
+	session, err := b.logIn()
 	if err != nil {
 		return err
 	}
 	wg.Add(1)
 	logger.Info("online")
+
+	err = b.http_server.GiveRouter("discord", b.ReceiveRouter)
+	if err != nil {
+		logger.Errore(err)
+	}
 
 	err = b.http_server.GiveRouter("twitch", b.twitch_client.ReceiveRouter)
 	if err != nil {
@@ -120,13 +136,13 @@ func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
 	return nil
 }
 
-func (b *bot) logIn(shutdown chan bool) (session *discordgo.Session, err error) {
+func (b *bot) logIn() (session *discordgo.Session, err error) {
 	session, err = discordgo.New(getToken())
 	if err != nil {
 		return nil, DiscordError.Wrap(err)
 	}
 
-	err = b.addHandlers(session, shutdown)
+	err = b.addHandlers(session)
 	if err != nil {
 		return nil, DiscordError.Wrap(err)
 	}
@@ -168,7 +184,7 @@ func (b *bot) removeHandlers() (err error) {
 	return nil
 }
 
-func (b *bot) addHandlers(session *discordgo.Session, shutdown chan bool) (
+func (b *bot) addHandlers(session *discordgo.Session) (
 	err error) {
 
 	b.handler_callbacks = append(b.handler_callbacks,
@@ -529,4 +545,156 @@ func (b *bot) listCommands(cmd string) string {
 	sort.Strings(strs)
 
 	return strings.Join(strs, ", ")
+}
+
+func (b *bot) ReceiveRouter(router *mux.Router) (err error) {
+	router.HandleFunc("/oauth/redirect", b.oauthRedirect)
+	router.HandleFunc("/", b.handleHTTP)
+	return nil
+}
+
+func (b *bot) oauthRedirect(w http.ResponseWriter, req *http.Request) {
+	values := req.URL.Query()
+
+	// The state parameter verifies that this request came from the entity
+	// that we generated an OAuth request for, assuming we used HTTPs and it
+	// wasn't interfered with.
+	state := values.Get("state")
+	if state == "" {
+		http.Error(w, "failed to parse state query parameter",
+			http.StatusBadRequest)
+		return
+	}
+
+	b.oauth_mtx.Lock()
+	_, ok := b.oauth_states[state]
+	b.oauth_mtx.Unlock()
+	if !ok {
+		http.Error(w, "unrecognized oauth state",
+			http.StatusBadRequest)
+		return
+	}
+
+	// I don't believe the code is needed at all.
+	code := values.Get("code")
+	if code == "" {
+		http.Error(w, "failed to parse code query parameter",
+			http.StatusBadRequest)
+		return
+	}
+
+	// Everything below here should be optional
+
+	// Useful so that xMTP bot can greet the guild.
+	guild_id := values.Get("guild_id")
+	if guild_id == "" {
+		logger.Warnf("no guild_id in OAuth2 redirect")
+	}
+
+	session, err := discordgo.New(getToken())
+	if err != nil {
+		logger.Warnf("error logging in to discord: %v", err)
+	}
+
+	guild, err := session.Guild(guild_id)
+	if err != nil {
+		logger.Warnf("error retrieving guild information: %v", err)
+	}
+
+	_, err = session.ChannelMessageSend(guild_id,
+		fmt.Sprintf("Hello, %s", guild.Name))
+	if err != nil {
+		logger.Warnf("error greeting guild: %+v", err)
+	}
+
+	t, err := template.New("registration_successful").Parse(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8">
+<title>xMTP bot Discord Integration</title>
+</head>
+<body>
+<p>
+Successfully registered xMTP bot with {{.GuildName}}.
+</p>
+</body>
+</html>`)
+	if err != nil {
+		logger.Warnf("error generating success template")
+		return
+	}
+
+	data := struct {
+		GuildName string
+	}{
+		GuildName: guild.Name,
+	}
+	buf := bytes.NewBufferString("")
+	err = t.Execute(buf, data)
+	if err != nil {
+		logger.Warnf("error rendering success template")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}
+
+const tpl = `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>xMTP bot Discord Integration</title>
+	</head>
+	<body>
+		<p>
+		To authorize xMTP bot to join your Discord server/guild, visit the following URL: <a href="{{.URL}}">{{.URL}}</a>
+		</p>
+	</body>
+</html>`
+
+func (b *bot) handleHTTP(w http.ResponseWriter, req *http.Request) {
+	t, err := template.New("root").Parse(tpl)
+	data := struct {
+		URL  string
+		Test string
+	}{
+		URL:  b.discordOauthURL(),
+		Test: url.QueryEscape("this is a test ://"),
+	}
+	buf := bytes.NewBufferString("")
+	err = t.Execute(buf, data)
+	if err != nil {
+		logger.Errore(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("failed to generate discord oauth URL"))
+		return
+	}
+	logger.Debugf("HTTP request received\n%+v", req)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}
+
+func (b *bot) discordOauthURL() string {
+	params := make(url.Values)
+	params.Set("response_type", "code")
+	params.Set("redirect_uri",
+		"https://xmtpbot.xmtp.net/discord/oauth/redirect")
+	params.Set("client_id", *clientId)
+	params.Set("scope", "bot")
+	params.Set("permission", "0")
+	state, err := util.RandomState(32)
+	if err != nil {
+		logger.Errore(err)
+		return ""
+	}
+	b.oauth_mtx.Lock()
+	b.oauth_states[state] = time.Now().String()
+	b.oauth_mtx.Unlock()
+	params.Set("state", state)
+	oauth_url := fmt.Sprintf("https://discordapp.com/oauth2/authorize?%s",
+		params.Encode())
+	logger.Debugf("discord oauth url: %s", oauth_url)
+
+	return oauth_url
 }
