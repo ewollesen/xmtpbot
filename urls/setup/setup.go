@@ -11,9 +11,13 @@ import (
 )
 
 func NewStore() urls.Store {
+	return NewStoreFromFilename(*urls.StoreFilename)
+}
+
+func NewStoreFromFilename(filename string) urls.Store {
 	switch strings.ToLower(*urls.StoreType) {
 	case "json":
-		return json.New(*urls.StoreFilename)
+		return json.New(filename)
 	case "memory":
 	default:
 	}

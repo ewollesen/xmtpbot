@@ -4,7 +4,9 @@ package slack
 
 import (
 	"flag"
+	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
 
+	"xmtp.net/xmtpbot/dice"
+	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/seen"
@@ -29,6 +33,7 @@ var (
 )
 
 type bot struct {
+	user_id      string
 	seen         seen.Store
 	urls         urls.Store
 	mildred      mildred.Conn
@@ -50,7 +55,29 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		oauth_states: make(map[string]string),
 	}
 
+	b.RegisterCommand("commands", simpleCommand(b.listCommands,
+		"list available commands"))
+	b.RegisterCommand("faq", staticCommand("No FAQs answered yet",
+		"frequently answered questions"))
+	b.RegisterCommand("help", simpleCommand(b.help,
+		"list available commands"))
+	b.RegisterCommand("idle", &commandHandler{
+		help:    "reports a user's idle time",
+		handler: b.idle,
+	})
+	b.RegisterCommand("link", simpleCommand(b.lookupURL,
+		"search for a previously posted URL"))
+	b.RegisterCommand("np", simpleCommand(b.nowPlaying,
+		"report Mildred's currently playing track"))
 	b.RegisterCommand("ping", staticCommand("pong", "pong"))
+	b.RegisterCommand("roll", simpleCommand(dice.Roll, "roll some dice"))
+	b.RegisterCommand("seen", &commandHandler{
+		help:    "reports when a user was last seen",
+		handler: b.lastSeen,
+	})
+	b.RegisterCommand("syn", staticCommand("ack", "ack"))
+	b.RegisterCommand("url", simpleCommand(b.lookupURL,
+		"search for a previously posted URL"))
 
 	return b
 }
@@ -95,6 +122,11 @@ func (b *bot) messageHandler(session *slack.Client, rtm *slack.RTM) {
 			case *slack.MessageEvent:
 				me := msg.Data.(*slack.MessageEvent)
 				logger.Debugf("<- %+v", me.Text)
+				logger.Warne(b.markSeen(session, me.User))
+
+				if me.User == b.mySlackUserId(rtm) {
+					continue
+				}
 
 				if strings.HasPrefix(me.Text, "!") {
 					args := strings.SplitN(me.Text, " ", 2)
@@ -108,6 +140,11 @@ func (b *bot) messageHandler(session *slack.Client, rtm *slack.RTM) {
 						rtm:     rtm,
 						message: me,
 					})
+				}
+
+				urls := b.parseURLs(me.Text)
+				if len(urls) > 0 {
+					b.rememberURLs(urls...)
 				}
 			}
 		}
@@ -194,4 +231,137 @@ func (b *bot) handleCommand(cmd Command) {
 			logger.Errore(err)
 		}
 	}
+}
+
+// FIXME cut and paste from discord
+func (b *bot) listCommands(cmd string) string {
+	b.commands_mtx.Lock()
+	cmds := b.commands
+	b.commands_mtx.Unlock()
+
+	var strs []string
+	for name, _ := range cmds {
+		strs = append(strs, name)
+	}
+	sort.Strings(strs)
+
+	return strings.Join(strs, ", ")
+}
+
+// FIXME cut and paste from discord
+func (b *bot) help(cmd string) string {
+	if cmd == "" {
+		return "usage: help <command>"
+	}
+
+	b.commands_mtx.Lock()
+	ch, ok := b.commands[cmd]
+	b.commands_mtx.Unlock()
+
+	if !ok {
+		return fmt.Sprintf("No help for %q found", cmd)
+	}
+
+	return fmt.Sprintf("%s: %s", cmd, ch.Help())
+}
+
+// FIXME cut and paste from discord
+func (b *bot) idle(cmd Command) error {
+	if cmd.args == "" {
+		return cmd.Reply("No name specified")
+	}
+
+	since, err := b.seen.Idle(cmd.args)
+	if err != nil {
+		return cmd.Reply(fmt.Sprintf("Error retrieving idle for %q",
+			cmd.args))
+	}
+	if since == nil {
+		return cmd.Reply(fmt.Sprintf("No idle record for %q found",
+			cmd.args))
+	}
+
+	return cmd.Reply(fmt.Sprintf("%s idle for %s", cmd.args, since))
+}
+
+// FIXME cut and paste from discord
+func (b *bot) lastSeen(cmd Command) error {
+	if cmd.args == "" {
+		return cmd.Reply("No name specified")
+	}
+
+	at, err := b.seen.LastSeen(cmd.args)
+	if err != nil {
+		return cmd.Reply(fmt.Sprintf("Error retrieving last seen for %q",
+			cmd.args))
+	}
+	if at == nil {
+		return cmd.Reply(fmt.Sprintf("No seen record for %q found",
+			cmd.args))
+	}
+
+	return cmd.Reply(fmt.Sprintf("%s was last seen %s", cmd.args, at))
+}
+
+// FIXME cut and paste from discord
+func (b *bot) lookupURL(msg string) string {
+	urls := b.urls.Lookup(msg)
+	if len(urls) > 0 {
+		lines := []string{}
+		for _, url := range urls {
+			lines = append(lines,
+				fmt.Sprintf("%s - %s", url[0], url[1]))
+		}
+		sort.Strings(lines)
+		return fmt.Sprintf("Matched %d URLs:\n%s",
+			len(urls), strings.Join(lines, "\n"))
+	}
+	return "No matching URLs found"
+}
+
+func (b *bot) markSeen(session *slack.Client, name string) error {
+	user, err := session.GetUserInfo(name)
+	if err != nil {
+		return err
+	}
+
+	return b.seen.MarkSeen(user.Name, nil)
+}
+
+// FIXME cut and paste from discord
+func (b *bot) parseURLs(msg string) []string {
+	return urls.Parse(msg)
+}
+
+// FIXME cut and paste from discord
+func (b *bot) rememberURLs(urls ...string) {
+	for _, url := range urls {
+		title, err := html.ParseTitleFromURL(url)
+		if err != nil {
+			logger.Warne(err)
+		}
+		b.urls.Remember(url, title)
+		logger.Debugf("remembered URL %q", url)
+	}
+}
+
+// FIXME cut and paste from discord
+func (b *bot) nowPlaying(args string) string {
+	cs := b.mildred.CurrentSong()
+	if cs != nil {
+		return cs.String()
+	} else {
+		return "error determining current song"
+	}
+}
+
+func (b *bot) mySlackUserId(rtm *slack.RTM) string {
+	if b.user_id != "" {
+		return b.user_id
+	}
+
+	info := rtm.GetInfo()
+	b.user_id = info.User.ID
+
+	return info.User.ID
 }

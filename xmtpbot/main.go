@@ -6,12 +6,14 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"path"
 	"sync"
 
 	"github.com/spacemonkeygo/flagfile"
 	"github.com/spacemonkeygo/spacelog"
 	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
 
+	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/discord"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/mildred"
@@ -48,8 +50,10 @@ func main() {
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 
 	slack_bot := slack.New(
-		urls_setup.NewStore(),
-		seen_setup.NewStore(),
+		urls_setup.NewStoreFromFilename(
+			path.Join(*config.Dir, "slack-urls.json")),
+		seen_setup.NewStoreFromFilename(
+			path.Join(*config.Dir, "slack-seen.json")),
 		mildred.New(),
 		http_server)
 	logger.Errore(slack_bot.Run(shutdown, &wg))
