@@ -206,7 +206,10 @@ func (b *bot) addHandlers(session *discordgo.Session) (
 }
 
 func (b *bot) handleCommand(cmd Command) string {
+	b.commands_mtx.Lock()
 	handler, ok := b.commands[cmd.cmd]
+	b.commands_mtx.Unlock()
+
 	if ok {
 		handler.Handle(cmd)
 		return "" // TODO fixme ugly
