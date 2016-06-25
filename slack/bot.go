@@ -28,6 +28,7 @@ import (
 	"github.com/spacemonkeygo/spacelog"
 
 	"xmtp.net/xmtpbot/dice"
+	"xmtp.net/xmtpbot/fortune"
 	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/mildred"
@@ -71,6 +72,8 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		"list available commands"))
 	b.RegisterCommand("faq", staticCommand("No FAQs answered yet",
 		"frequently answered questions"))
+	b.RegisterCommand("fortune", simpleCommand(b.fortune,
+		"receive great fortune cookie wisdom"))
 	b.RegisterCommand("help", simpleCommand(b.help,
 		"list available commands"))
 	b.RegisterCommand("idle", &commandHandler{
@@ -376,4 +379,15 @@ func (b *bot) mySlackUserId(rtm *slack.RTM) string {
 	b.user_id = info.User.ID
 
 	return info.User.ID
+}
+
+// FIXME cut and paste from discord
+func (b *bot) fortune(args string) string {
+	fortune, err := fortune.Fortune()
+	if err != nil {
+		logger.Errore(err)
+		return "error retrieving fortune"
+	}
+
+	return fortune
 }

@@ -19,7 +19,13 @@ import (
 	"path"
 	"regexp"
 
+	"github.com/spacemonkeygo/spacelog"
+
 	"xmtp.net/xmtpbot/config"
+)
+
+const (
+	urlRe = "(?:https?|ftps?)://[a-zA-Z0-9\\-\\.:/?#\\[\\]@!$&'\\(\\)*+,;=]+"
 )
 
 var (
@@ -29,7 +35,9 @@ var (
 		path.Join(*config.Dir, "urls.json"),
 		"filename in which to store collected URLs")
 
-	URLRegexp = regexp.MustCompile("https?://[^ ]+")
+	URLRegexp = regexp.MustCompile(urlRe)
+
+	logger = spacelog.GetLogger()
 )
 
 type Store interface {
@@ -40,6 +48,6 @@ type Store interface {
 	Remember(url, title string) error
 }
 
-func Parse(input string) []string {
+func Parse(input string) (urls []string) {
 	return URLRegexp.FindAllString(input, -1)
 }

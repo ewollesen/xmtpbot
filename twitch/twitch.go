@@ -57,7 +57,7 @@ var (
 
 type Twitch interface {
 	Following(name string) ([]Channel, error)
-	Live() ([]Stream, error)
+	Live(name string) ([]Stream, error)
 	Follow(names ...string) string
 	Unfollow(names ...string)
 	Auth(name string) (auth_url string, err error)
@@ -298,13 +298,71 @@ func (t *twitch) twitchURL(path_template string, args ...interface{}) (
 	return url.String(), nil
 }
 
-func (t *twitch) Live() (streams []Stream, err error) {
+func (t *twitch) Live(name string) (streams []Stream, err error) {
+	if name == "" {
+		return t.liveFromStore()
+	} else {
+		return t.liveByName(name)
+	}
+}
+
+func (t *twitch) liveFromStore() (streams []Stream, err error) {
 	var stream_names []string
 	t.channel_store.Iterate(func(key, value string) {
 		stream_names = append(stream_names, key)
 	})
 
 	xs, err := t.getStreams(stream_names...)
+	if err != nil {
+		return
+	}
+	for _, x := range xs {
+		s := stream{ts: x}
+		streams = append(streams, &s)
+	}
+
+	sort.Sort(sort.Reverse(StreamByUpdatedAt(streams)))
+
+	return streams, nil
+}
+
+func (t *twitch) liveByName(name string) (streams []Stream, err error) {
+	url, err := t.twitchURL("users/%s/follows/channels", name)
+	if err != nil {
+		return nil, err
+	}
+	// TODO support more than 100 links
+	url += "?limit=100"
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw_json, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		logger.Debugf("raw json response: %s", string(raw_json))
+		return nil, err
+	}
+
+	var response_structure struct {
+		Follows []struct {
+			Channel *twitchChannel `json:"channel"`
+		} `json:"follows"`
+	}
+	err = json.Unmarshal(raw_json, &response_structure)
+	if err != nil {
+		logger.Debugf("raw json response: %s", string(raw_json))
+		return nil, err
+	}
+
+	var names []string
+	for _, resp := range response_structure.Follows {
+		names = append(names, resp.Channel.Name)
+	}
+
+	xs, err := t.getStreams(names...)
 	if err != nil {
 		return
 	}

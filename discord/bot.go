@@ -34,6 +34,7 @@ import (
 
 	"xmtp.net/xmtpbot/dice"
 	"xmtp.net/xmtpbot/dur"
+	"xmtp.net/xmtpbot/fortune"
 	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/mildred"
@@ -48,7 +49,8 @@ var (
 	token    = flag.String("discord.token", "", "Discord bot API token")
 	clientId = flag.String("discord.client_id", "",
 		"Discord application client id")
-
+	maxSendSize = flag.Int("discord.max_send_size", 1024,
+		"Max size of a single Discord message")
 	logger = spacelog.GetLogger()
 
 	DiscordError = errors.NewClass("discord")
@@ -88,6 +90,8 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		"list available commands"))
 	b.RegisterCommand("faq", staticCommand("No FAQs answered yet",
 		"frequently answered questions"))
+	b.RegisterCommand("fortune", simpleCommand(b.fortune,
+		"receive great fortune cookie wisdom"))
 	b.RegisterCommand("help", simpleCommand(b.help,
 		"list available commands"))
 	b.RegisterCommand("idle", &commandHandler{
@@ -205,17 +209,14 @@ func (b *bot) addHandlers(session *discordgo.Session) (
 	return nil
 }
 
-func (b *bot) handleCommand(cmd Command) string {
+func (b *bot) handleCommand(cmd Command) {
 	b.commands_mtx.Lock()
 	handler, ok := b.commands[cmd.cmd]
 	b.commands_mtx.Unlock()
 
 	if ok {
 		handler.Handle(cmd)
-		return "" // TODO fixme ugly
 	}
-
-	return fmt.Sprintf("unhandled command: %q", cmd.cmd)
 }
 
 type Command struct {
@@ -226,8 +227,19 @@ type Command struct {
 }
 
 func (c *Command) Reply(msg string) (err error) {
-	_, err = c.session.ChannelMessageSend(c.message.ChannelID, msg)
-	return err
+	if len(msg) < *maxSendSize {
+		_, err = c.session.ChannelMessageSend(c.message.ChannelID, msg)
+		return err
+	}
+
+	for _, piece := range splitResponse(msg, 10) {
+		_, err = c.session.ChannelMessageSend(c.message.ChannelID, piece)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -238,15 +250,13 @@ func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	response := ""
-
 	if strings.HasPrefix(m.Content, "!") {
 		args := strings.SplitN(m.Content, " ", 2)
 		new_args := ""
 		if len(args) > 1 {
 			new_args = args[1]
 		}
-		response = b.handleCommand(Command{
+		b.handleCommand(Command{
 			cmd:     args[0][1:],
 			args:    new_args,
 			session: s,
@@ -258,18 +268,10 @@ func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if len(urls) > 0 {
 		b.rememberURLs(urls...)
 	}
-
-	if response != "" {
-		for _, chunk := range splitResponse(response, 10) {
-			_, err := s.ChannelMessageSend(m.ChannelID, chunk)
-			if err != nil {
-				logger.Warne(err)
-			}
-		}
-	}
-
 }
 
+// TODO split on line breaks after at most X chars, not based on lines
+// TODO find out the maximum message size in discord
 func splitResponse(response string, num_lines int) (chunks []string) {
 	lines := strings.Split(response, "\n")
 	chunk := []string{lines[0]}
@@ -433,7 +435,7 @@ func (b *bot) twitch(args string) string {
 		return "Done"
 	case "live":
 		var response []string
-		streams, err := client.Live()
+		streams, err := client.Live(args)
 		if err != nil {
 			logger.Errore(err)
 			return "error retrieving live twitch streams"
@@ -710,4 +712,14 @@ func (b *bot) discordOauthURL() string {
 	logger.Debugf("discord oauth url: %s", oauth_url)
 
 	return oauth_url
+}
+
+func (b *bot) fortune(args string) string {
+	fortune, err := fortune.Fortune()
+	if err != nil {
+		logger.Errore(err)
+		return "error retrieving fortune"
+	}
+
+	return fortune
 }

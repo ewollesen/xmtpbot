@@ -72,12 +72,10 @@ func main() {
 
 	go http_server.Serve()
 
-	select {
-	case <-interrupt:
-		logger.Infof("interrupt received")
-		close(shutdown)
-		wg.Wait()
-	}
+	<-interrupt
+	logger.Infof("interrupt received")
+	close(shutdown)
+	wg.Wait()
 }
 
 func loadFlags() {
