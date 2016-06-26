@@ -186,38 +186,9 @@ func (t *twitch) followingFromStore() (channels []Channel, err error) {
 }
 
 func (t *twitch) followingByName(name string) (channels []Channel, err error) {
-	url, err := t.twitchURL("users/%s/follows/channels", name)
+	channels, err = t.getFollowedChannels(name)
 	if err != nil {
 		return nil, err
-	}
-	// TODO support more than 100 links
-	url += "?limit=100"
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	raw_json, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		logger.Debugf("raw json response: %s", string(raw_json))
-		return nil, err
-	}
-
-	var response_structure struct {
-		Follows []struct {
-			Channel *twitchChannel `json:"channel"`
-		} `json:"follows"`
-	}
-	err = json.Unmarshal(raw_json, &response_structure)
-	if err != nil {
-		logger.Debugf("raw json response: %s", string(raw_json))
-		return nil, err
-	}
-
-	for _, resp := range response_structure.Follows {
-		channels = append(channels, &channel{tc: resp.Channel})
 	}
 
 	sort.Sort(ChannelByName(channels))
@@ -327,10 +298,36 @@ func (t *twitch) liveFromStore() (streams []Stream, err error) {
 }
 
 func (t *twitch) liveByName(name string) (streams []Stream, err error) {
+	channels, err := t.getFollowedChannels(name)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, channel := range channels {
+		names = append(names, channel.Name())
+	}
+
+	raw_streams, err := t.getStreams(names...)
+	if err != nil {
+		return nil, err
+	}
+	for _, raw_stream := range raw_streams {
+		stream := stream{ts: raw_stream}
+		streams = append(streams, &stream)
+	}
+
+	sort.Sort(sort.Reverse(StreamByUpdatedAt(streams)))
+
+	return streams, nil
+}
+
+func (t *twitch) getFollowedChannels(name string) (channels []Channel, err error) {
 	url, err := t.twitchURL("users/%s/follows/channels", name)
 	if err != nil {
 		return nil, err
 	}
+
 	// TODO support more than 100 links
 	url += "?limit=100"
 
@@ -357,23 +354,11 @@ func (t *twitch) liveByName(name string) (streams []Stream, err error) {
 		return nil, err
 	}
 
-	var names []string
 	for _, resp := range response_structure.Follows {
-		names = append(names, resp.Channel.Name)
+		channels = append(channels, &channel{tc: resp.Channel})
 	}
 
-	xs, err := t.getStreams(names...)
-	if err != nil {
-		return
-	}
-	for _, x := range xs {
-		s := stream{ts: x}
-		streams = append(streams, &s)
-	}
-
-	sort.Sort(sort.Reverse(StreamByUpdatedAt(streams)))
-
-	return streams, nil
+	return channels, nil
 }
 
 func (c *channel) Name() string {
