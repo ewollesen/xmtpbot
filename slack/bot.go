@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/nlopes/slack"
@@ -31,6 +32,7 @@ import (
 	"xmtp.net/xmtpbot/fortune"
 	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/http_server"
+	"xmtp.net/xmtpbot/http_status"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/seen"
 	"xmtp.net/xmtpbot/urls"
@@ -46,26 +48,29 @@ var (
 )
 
 type bot struct {
-	user_id      string
-	seen         seen.Store
-	urls         urls.Store
-	mildred      mildred.Conn
-	http_server  http_server.Server
-	commands_mtx sync.Mutex
-	commands     map[string]CommandHandler
-	oauth_mtx    sync.Mutex
-	oauth_states map[string]string
+	user_id          string
+	seen             seen.Store
+	urls             urls.Store
+	mildred          mildred.Conn
+	http_server      http_server.Server
+	commands_mtx     sync.Mutex
+	commands         map[string]CommandHandler
+	oauth_mtx        sync.Mutex
+	oauth_states     map[string]string
+	last_activity    time.Time
+	commands_handled uint64
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
-	http_server http_server.Server) *bot {
+	http_server http_server.Server, http_status http_status.Status) *bot {
 	b := &bot{
-		seen:         seen_store,
-		urls:         urls_store,
-		mildred:      mildred,
-		http_server:  http_server,
-		commands:     make(map[string]CommandHandler),
-		oauth_states: make(map[string]string),
+		seen:          seen_store,
+		urls:          urls_store,
+		mildred:       mildred,
+		http_server:   http_server,
+		commands:      make(map[string]CommandHandler),
+		oauth_states:  make(map[string]string),
+		last_activity: time.Now(),
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -93,6 +98,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	b.RegisterCommand("syn", staticCommand("ack", "ack"))
 	b.RegisterCommand("url", simpleCommand(b.lookupURL,
 		"search for a previously posted URL"))
+	http_status.Register("slack", b.Status)
 
 	return b
 }
@@ -132,6 +138,7 @@ func (b *bot) messageHandler(session *slack.Client, rtm *slack.RTM) {
 	for {
 		select {
 		case msg := <-rtm.IncomingEvents:
+			b.activity()
 			//logger.Debugf("<- %+v", msg.Data)
 			switch msg.Data.(type) {
 			case *slack.MessageEvent:
@@ -241,6 +248,7 @@ func getToken() (slack_token string) {
 func (b *bot) handleCommand(cmd Command) {
 	handler, ok := b.commands[cmd.cmd]
 	if ok {
+		b.commands_handled++
 		err := handler.Handle(cmd)
 		if err != nil {
 			logger.Errore(err)
@@ -390,4 +398,19 @@ func (b *bot) fortune(args string) string {
 	}
 
 	return fortune
+}
+
+// FIXME cut and paste from discord
+func (b *bot) Status() map[string]string {
+	return map[string]string{
+		"urls":             fmt.Sprintf("%d", b.urls.Length()),
+		"seen":             fmt.Sprintf("%d", b.seen.Length()),
+		"last activity":    b.last_activity.String(),
+		"commands handled": fmt.Sprintf("%d", b.commands_handled),
+	}
+}
+
+// FIXME cut and paste from discord
+func (b *bot) activity() {
+	b.last_activity = time.Now()
 }

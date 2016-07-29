@@ -48,7 +48,9 @@ func New() Server {
 	s.mux.StrictSlash(true)
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		logger.Debugf("%+v", req)
-		w.Write([]byte("xMTP bot HTTP interface\n"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte("<h1>xMTP bot HTTP interface</h1>\n"))
+		w.Write([]byte("<div><a href=\"/status\">Status</a></div>\n"))
 	})
 
 	return &s

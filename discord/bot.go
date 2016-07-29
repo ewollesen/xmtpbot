@@ -37,6 +37,7 @@ import (
 	"xmtp.net/xmtpbot/fortune"
 	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/http_server"
+	"xmtp.net/xmtpbot/http_status"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	"xmtp.net/xmtpbot/seen"
@@ -69,11 +70,13 @@ type bot struct {
 	commands          map[string]CommandHandler
 	oauth_mtx         sync.Mutex
 	oauth_states      map[string]string
+	last_activity     time.Time
+	commands_handled  uint64
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	remind remind.Remind, twitch twitch.Twitch,
-	http_server http_server.Server) *bot {
+	http_server http_server.Server, http_status http_status.Status) *bot {
 
 	b := &bot{
 		seen:          seen_store,
@@ -84,6 +87,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		http_server:   http_server,
 		commands:      make(map[string]CommandHandler),
 		oauth_states:  make(map[string]string),
+		last_activity: time.Now(),
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -118,6 +122,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		"interact with twitch. Run \"!twitch help\" for more info"))
 	b.RegisterCommand("url", simpleCommand(b.lookupURL,
 		"search for a previously posted URL"))
+	http_status.Register("discord", b.Status)
 
 	return b
 }
@@ -216,6 +221,7 @@ func (b *bot) handleCommand(cmd Command) {
 
 	if ok {
 		handler.Handle(cmd)
+		b.commands_handled++
 	}
 }
 
@@ -245,6 +251,7 @@ func (c *Command) Reply(msg string) (err error) {
 func (b *bot) messageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	logger.Debugf("<- %s", m.Content)
 	logger.Warne(b.markSeen(m.Author.Username))
+	b.activity()
 
 	if m.Author.ID == b.myDiscordUserId(s) {
 		return
@@ -722,4 +729,17 @@ func (b *bot) fortune(args string) string {
 	}
 
 	return fortune
+}
+
+func (b *bot) Status() map[string]string {
+	return map[string]string{
+		"urls":             fmt.Sprintf("%d", b.urls.Length()),
+		"seen":             fmt.Sprintf("%d", b.seen.Length()),
+		"last activity":    b.last_activity.String(),
+		"commands handled": fmt.Sprintf("%d", b.commands_handled),
+	}
+}
+
+func (b *bot) activity() {
+	b.last_activity = time.Now()
 }

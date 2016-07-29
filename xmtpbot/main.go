@@ -28,6 +28,7 @@ import (
 	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/discord"
 	"xmtp.net/xmtpbot/http_server"
+	"xmtp.net/xmtpbot/http_status"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
@@ -50,6 +51,7 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 	shutdown := make(chan bool)
 	http_server := http_server.New()
+	http_status := http_status.New(http_server)
 	var wg sync.WaitGroup
 
 	discord_bot := discord.New(
@@ -58,7 +60,8 @@ func main() {
 		mildred.New(),
 		remind.New(),
 		twitch.Setup(),
-		http_server)
+		http_server,
+		http_status)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 
 	slack_bot := slack.New(
@@ -67,8 +70,11 @@ func main() {
 		seen_setup.NewStoreFromFilename(
 			path.Join(*config.Dir, "slack-seen.json")),
 		mildred.New(),
-		http_server)
+		http_server,
+		http_status)
 	logger.Errore(slack_bot.Run(shutdown, &wg))
+
+	logger.Errore(http_status.Run(shutdown, &wg))
 
 	go http_server.Serve()
 
