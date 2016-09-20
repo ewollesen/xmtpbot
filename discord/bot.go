@@ -104,8 +104,10 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	})
 	b.RegisterCommand("link", simpleCommand(b.lookupURL,
 		"search for a previously posted URL"))
-	b.RegisterCommand("np", simpleCommand(b.nowPlaying,
-		"report Mildred's currently playing track"))
+	if mildred != nil {
+		b.RegisterCommand("np", simpleCommand(b.nowPlaying,
+			"report Mildred's currently playing track"))
+	}
 	b.RegisterCommand("ping", staticCommand("pong", "pong"))
 	b.RegisterCommand("remind", &commandHandler{
 		help: "sets a reminder. " +
@@ -118,8 +120,11 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		handler: b.lastSeen,
 	})
 	b.RegisterCommand("syn", staticCommand("ack", "ack"))
-	b.RegisterCommand("twitch", simpleCommand(b.twitch,
-		"interact with twitch. Run \"!twitch help\" for more info"))
+	if twitch != nil {
+		b.RegisterCommand("twitch", simpleCommand(b.twitch,
+			"interact with twitch. Run \"!twitch help\" for "+
+				"more info"))
+	}
 	b.RegisterCommand("url", simpleCommand(b.lookupURL,
 		"search for a previously posted URL"))
 	http_status.Register("discord", b.Status)
@@ -140,9 +145,12 @@ func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
 		logger.Errore(err)
 	}
 
-	err = b.http_server.GiveRouter("twitch", b.twitch_client.ReceiveRouter)
-	if err != nil {
-		logger.Errore(err)
+	if b.twitch_client != nil {
+		err = b.http_server.GiveRouter("twitch",
+			b.twitch_client.ReceiveRouter)
+		if err != nil {
+			logger.Errore(err)
+		}
 	}
 
 	go func() {

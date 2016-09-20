@@ -59,7 +59,6 @@ func (s *http_status) Register(name string, handler StatusHandlerFunc) {
 }
 
 func (s *http_status) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
-	wg.Add(1)
 	logger.Info("online")
 
 	err = s.http_server.GiveRouter("status", s.ReceiveRouter)
