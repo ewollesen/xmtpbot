@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/http_status"
 	"xmtp.net/xmtpbot/mildred"
+	"xmtp.net/xmtpbot/queue"
 	"xmtp.net/xmtpbot/remind"
 	"xmtp.net/xmtpbot/seen"
 	"xmtp.net/xmtpbot/twitch"
@@ -52,6 +54,10 @@ var (
 		"Discord application client id")
 	maxSendSize = flag.Int("discord.max_send_size", 1024,
 		"Max size of a single Discord message")
+	hostname = flag.String("discord.hostname", "xmtpbot.xmtp.net",
+		"Hostname for discord oauth redirects")
+	protocol = flag.String("discord.protocol", "https",
+		"Protocol for discord oauth redirects")
 	logger = spacelog.GetLogger()
 
 	DiscordError = errors.NewClass("discord")
@@ -72,6 +78,8 @@ type bot struct {
 	oauth_states      map[string]string
 	last_activity     time.Time
 	commands_handled  uint64
+	queues            map[string]queue.Queue
+	queues_mtx        sync.Mutex
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
@@ -88,6 +96,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		commands:      make(map[string]CommandHandler),
 		oauth_states:  make(map[string]string),
 		last_activity: time.Now(),
+		queues:        make(map[string]queue.Queue),
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -127,6 +136,19 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	}
 	b.RegisterCommand("url", simpleCommand(b.lookupURL,
 		"search for a previously posted URL"))
+	b.RegisterCommand("dequeue", &commandHandler{
+		help:    "leave the scrimmages queue",
+		handler: b.dequeue,
+	})
+	b.RegisterCommand("enqueue", &commandHandler{
+		help:    "leave the scrimmages queue",
+		handler: b.enqueue,
+	})
+	b.RegisterCommand("queue", &commandHandler{
+		help: "queue for scrimmages. Run \"!queue help\" for " +
+			"more info",
+		handler: b.queue,
+	})
 	http_status.Register("discord", b.Status)
 
 	return b
@@ -182,7 +204,7 @@ func (b *bot) logIn() (session *discordgo.Session, err error) {
 	return session, nil
 }
 
-func getToken() (discord_token string) {
+func getTokenBare() (discord_token string) {
 	defer func() {
 		if discord_token == "" {
 			logger.Warnf("discord token is blank, connection will " +
@@ -195,6 +217,11 @@ func getToken() (discord_token string) {
 	}
 
 	return *token
+}
+
+func getToken() (discord_token string) {
+	// https://github.com/bwmarrin/discordgo/pull/248#issuecomment-244598442
+	return fmt.Sprintf("Bot %s", getTokenBare())
 }
 
 func (b *bot) logOut(session *discordgo.Session) {
@@ -626,15 +653,22 @@ func (b *bot) oauthRedirect(w http.ResponseWriter, req *http.Request) {
 		logger.Warnf("error logging in to discord: %v", err)
 	}
 
+	logger.Debugf("guild_id: %q", guild_id)
 	guild, err := session.Guild(guild_id)
 	if err != nil {
 		logger.Warnf("error retrieving guild information: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte("Registered successfully"))
+		return
 	}
 
 	_, err = session.ChannelMessageSend(guild_id,
 		fmt.Sprintf("Hello, %s", guild.Name))
 	if err != nil {
 		logger.Warnf("error greeting guild: %+v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte("Registered successfully"))
+		return
 	}
 
 	t, err := template.New("registration_successful").Parse(`<!DOCTYPE html>
@@ -709,7 +743,8 @@ func (b *bot) discordOauthURL() string {
 	params := make(url.Values)
 	params.Set("response_type", "code")
 	params.Set("redirect_uri",
-		"https://xmtpbot.xmtp.net/discord/oauth/redirect")
+		fmt.Sprintf("%s://%s/discord/oauth/redirect",
+			*protocol, *hostname))
 	params.Set("client_id", *clientId)
 	params.Set("scope", "bot")
 	params.Set("permission", "0")
@@ -750,4 +785,163 @@ func (b *bot) Status() map[string]string {
 
 func (b *bot) activity() {
 	b.last_activity = time.Now()
+}
+
+func (b *bot) queue(cmd Command) (err error) {
+	logger.Debugf("cmd: %s\targs: %s", cmd.cmd, cmd.args)
+
+	msg := ""
+	q := b.lookupQueue(cmd.message.ChannelID)
+
+	pieces := strings.SplitN(cmd.args, " ", 2)
+	subcommand := pieces[0]
+	args := ""
+	if len(pieces) > 1 {
+		args = pieces[1]
+	}
+	logger.Debugf("pieces: %s", args)
+
+	switch subcommand {
+	case "help", "":
+		msg = fmt.Sprintf("Manipulate the queue, type `!enqueue` to add " +
+			"yourself to the queue. Type `!dequeue` to remove " +
+			"yourself from the queue. Other commands include: " +
+			"`!queue <clear|list|pick>`.")
+	case "clear":
+		ok, err := userAuthorized("pick", cmd)
+		if err != nil {
+			return cmd.Reply(fmt.Sprintf("Error authorizing: %s", err))
+		}
+		if !ok {
+			return cmd.Reply("You're not authorized to use that command.")
+		}
+
+		if err := q.Clear(); err != nil {
+			return cmd.Reply(fmt.Sprintf(
+				"Error clearing the queue: %s", err))
+		}
+		msg = fmt.Sprintf("Queue cleared.")
+	case "list", "show":
+		users, err := q.List()
+		if err != nil {
+			return cmd.Reply(fmt.Sprintf(
+				"Error listing the queue: %s", err))
+		}
+		if len(users) > 0 {
+			names := []string{}
+			for _, user := range users {
+				names = append(names, user.Name())
+			}
+			msg = fmt.Sprintf("%s.", strings.Join(names, ", "))
+		} else {
+			msg = "The queue is empty!"
+		}
+	case "enqueue", "add":
+		msg = fmt.Sprintf("Just run !enqueue instead, this will be " +
+			"implemented later.")
+	case "dequeue", "remove", "del", "delete":
+		msg = fmt.Sprintf("Just run !dequeue instead, this will be " +
+			"implemented later.")
+	case "pick":
+		ok, err := userAuthorized("pick", cmd)
+		if err != nil {
+			return cmd.Reply(fmt.Sprintf("Error authorizing: %s", err))
+		}
+		if !ok {
+			return cmd.Reply("You're not authorized to use that command.")
+		}
+
+		num := int64(12)
+		if args != "" {
+			num, err = strconv.ParseInt(args, 10, 32)
+			if err != nil {
+				return cmd.Reply(fmt.Sprintf("Invalid pick "+
+					"argument %q", args))
+			}
+		}
+		users, err := q.Pick(int(num))
+		if err != nil {
+			return cmd.Reply(fmt.Sprintf("Error picking from "+
+				"queue: %s", err))
+		}
+
+		mentions := []string{}
+		for _, user := range users {
+			mentions = append(mentions, fmt.Sprintf("<@!%s>", user.Id()))
+		}
+		msg = fmt.Sprintf("Picked %d users: %s. %d users remain in the "+
+			" queue.", len(users), strings.Join(mentions, ", "), q.Size())
+	default:
+		msg = fmt.Sprintf("unhandled queue command: %q", cmd.args)
+	}
+
+	return cmd.Reply(msg)
+}
+
+func (b *bot) dequeue(cmd Command) (err error) {
+	b.queues_mtx.Lock()
+	defer b.queues_mtx.Unlock()
+
+	q := b.lookupQueue(cmd.message.ChannelID)
+
+	err = q.Remove(cmd.message.Author.ID)
+	if err != nil && !queue.NotFoundError.Contains(err) {
+		return cmd.Reply(fmt.Sprintf("Error dequeueing: %s", err))
+	}
+
+	return cmd.Reply(fmt.Sprintf("Successfully removed %s from the queue.",
+		mention(cmd.message.Author)))
+}
+
+func (b *bot) enqueue(cmd Command) (err error) {
+	b.queues_mtx.Lock()
+	defer b.queues_mtx.Unlock()
+
+	logger.Debugf("cmd: %s\targs: %s", cmd.cmd, cmd.args)
+
+	mention := mention(cmd.message.Author)
+	q := b.lookupQueue(cmd.message.ChannelID)
+
+	err = q.Add(cmd.message.Author.ID, cmd.message.Author.Username)
+	if err != nil {
+		if queue.AlreadyQueuedError.Contains(err) {
+			return cmd.Reply(fmt.Sprintf("User %s is already "+
+				"queued in position %d.",
+				mention, q.Position(cmd.message.Author.ID)))
+		}
+		return cmd.Reply(fmt.Sprintf("Error enqueueing: %s", err))
+	}
+
+	return cmd.Reply(fmt.Sprintf("Successfully added %s to the queue in "+
+		"position %d.", mention, q.Size()))
+}
+
+func mention(user *discordgo.User) string {
+	return fmt.Sprintf("<@!%s>", user.ID)
+}
+
+func username(user *discordgo.User) string {
+	return user.Username
+	// return fmt.Sprintf("%s#%s", user.Username, user.Discriminator)
+}
+
+// Be sure to hold queues_mtx when calling!
+func (b *bot) lookupQueue(name string) queue.Queue {
+	q, ok := b.queues[name]
+	if !ok {
+		q = queue.New()
+		b.queues[name] = q
+	}
+
+	return q
+}
+
+func userAuthorized(cmd_name string, cmd Command) (ok bool, err error) {
+	// ignore cmd for now, if they have the ability to kick they're authorized
+	perms, err := cmd.session.State.UserChannelPermissions(
+		cmd.message.Author.ID, cmd.message.ChannelID)
+	if err != nil {
+		return false, err
+	}
+	return perms&discordgo.PermissionKickMembers > 0, nil
 }
