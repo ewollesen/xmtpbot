@@ -17,95 +17,92 @@ package queue
 import (
 	"sync"
 
-	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
 )
 
 var (
 	logger = spacelog.GetLogger()
-
-	Error              = errors.NewClass("queue")
-	AlreadyQueuedError = Error.NewClass("user is already queued",
-		errors.NoCaptureStack())
-	NotFoundError = Error.NewClass("user is not queued",
-		errors.NoCaptureStack())
 )
 
-func (p *User) Id() string {
-	return p.id
-}
-
-func (p *User) Name() string {
-	return p.name
-}
-
 type queue struct {
-	users []User
-	mtx   sync.Mutex
+	queueables []Queueable
+	mtx        sync.Mutex
 }
 
-func New() Queue {
+func New() *queue {
 	return &queue{
-		users: make([]User, 0, 100),
+		queueables: make([]Queueable, 0, 100),
 	}
-}
-
-func (q *queue) Add(id string, name string) error {
-	q.mtx.Lock()
-	defer q.mtx.Unlock()
-
-	if q.contains(id) {
-		return AlreadyQueuedError.New("")
-	}
-	q.users = append(q.users, User{id: id, name: name})
-
-	return nil
 }
 
 func (q *queue) Clear() error {
 	q.mtx.Lock()
-	q.users = []User{}
+	q.queueables = []Queueable{}
 	q.mtx.Unlock()
 	return nil
 }
 
-func (q *queue) List() ([]User, error) {
-	q.mtx.Lock()
-	defer q.mtx.Unlock()
-
-	return q.users, nil
-}
-
-func (q *queue) Pick(amount int) ([]User, error) {
-	logger.Debugf("Pick amount %d", amount)
-	if amount == 0 {
+func (q *queue) Dequeue(num int) ([]Queueable, error) {
+	if num == 0 {
 		return nil, nil
 	}
 
 	q.mtx.Lock()
 	defer q.mtx.Unlock()
 
-	num_picked := min(len(q.users), amount)
-	picked := q.users[:num_picked]
-	q.users = q.users[num_picked:]
+	actual_num := min(len(q.queueables), num)
+	dequeued := q.queueables[:actual_num]
+	q.queueables = q.queueables[actual_num:]
 
-	return picked, nil
+	return dequeued, nil
 }
 
-func (q *queue) Remove(id string) error {
+func (q *queue) Enqueue(queueable Queueable) error {
 	q.mtx.Lock()
 	defer q.mtx.Unlock()
 
-	if !q.contains(id) {
+	if q.contains(queueable.Key()) {
+		return AlreadyQueuedError.New("")
+	}
+	q.queueables = append(q.queueables, queueable)
+
+	return nil
+}
+
+func (q *queue) List() ([]Queueable, error) {
+	q.mtx.Lock()
+	defer q.mtx.Unlock()
+	return q.queueables, nil
+}
+
+func (q *queue) Position(key string) int {
+	q.mtx.Lock()
+	defer q.mtx.Unlock()
+
+	for idx, candidate := range q.queueables {
+		if candidate.Key() == key {
+			return idx + 1
+		}
+	}
+
+	return -1
+}
+
+func (q *queue) Remove(key string) error {
+	q.mtx.Lock()
+	defer q.mtx.Unlock()
+
+	if !q.contains(key) {
 		return NotFoundError.New("")
 	}
-	without := []User{}
-	for _, candidate := range q.users {
-		if id != candidate.id {
+
+	without := []Queueable{}
+	for _, candidate := range q.queueables {
+		if key != candidate.Key() {
 			without = append(without, candidate)
 		}
 	}
-	q.users = without
+	q.queueables = without
 
 	return nil
 }
@@ -114,31 +111,18 @@ func (q *queue) Size() int {
 	q.mtx.Lock()
 	defer q.mtx.Unlock()
 
-	return len(q.users)
+	return len(q.queueables)
 }
 
-// You should hold q.mtx when you call this
-func (q *queue) contains(id string) bool {
-	for _, candidate := range q.users {
-		if id == candidate.id {
+// The caller is responsible for obtaining q.mtx if desired before calling
+func (q *queue) contains(key string) bool {
+	for _, candidate := range q.queueables {
+		if key == candidate.Key() {
 			return true
 		}
 	}
 
 	return false
-}
-
-func (q *queue) Position(id string) int {
-	q.mtx.Lock()
-	defer q.mtx.Unlock()
-
-	for idx, candidate := range q.users {
-		if candidate.id == id {
-			return idx + 1
-		}
-	}
-
-	return -1
 }
 
 func min(left, right int) int {

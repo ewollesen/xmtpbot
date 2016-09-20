@@ -14,16 +14,46 @@
 
 package queue
 
+import "github.com/spacemonkeygo/errors"
+
+var (
+	Error              = errors.NewClass("queue")
+	AlreadyQueuedError = Error.NewClass("user is already queued",
+		errors.NoCaptureStack())
+	NotFoundError = Error.NewClass("user is not queued",
+		errors.NoCaptureStack())
+)
+
 type Queue interface {
-	Add(id, name string) error
+	// Empty the Queue
 	Clear() error
-	List() ([]User, error)
-	Pick(amount int) ([]User, error)
-	Position(name string) int
-	Remove(name string) error
+
+	// Return (at most) the first +n+ Queueables from the Queue
+	Dequeue(n int) ([]Queueable, error)
+
+	// Enqueue the given Queueable
+	Enqueue(queueable Queueable) error
+
+	// Return all Queueables in the Queue
+	List() ([]Queueable, error)
+
+	// Return the (1-indexed) position of the Queueable in the Queue
+	//
+	// Returns -1 if the key isn't found in the Queue.
+	Position(key string) int
+
+	// Remove the first Queueable found with a matching key from the Queue
+	Remove(key string) error
+
+	// Return the size of the Queue
 	Size() int
 }
 
-type User struct {
-	id, name string
+type Queueable interface {
+	// A key that's unique to the Queueables in a given Queue
+	Key() string
+}
+
+type Manager interface {
+	Lookup(channel_key string) Queue
 }
