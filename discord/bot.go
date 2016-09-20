@@ -63,21 +63,23 @@ var (
 )
 
 type bot struct {
-	handler_callbacks []func()
-	seen              seen.Store
-	user_id           string
-	urls              urls.Store
-	mildred           mildred.Conn
-	remind            remind.Remind
-	twitch_client     twitch.Twitch
-	http_server       http_server.Server
-	commands_mtx      sync.Mutex
-	commands          map[string]CommandHandler
-	oauth_mtx         sync.Mutex
-	oauth_states      map[string]string
-	last_activity     time.Time
-	commands_handled  uint64
-	queues            queue.Manager
+	handler_callbacks           []func()
+	seen                        seen.Store
+	user_id                     string
+	urls                        urls.Store
+	mildred                     mildred.Conn
+	remind                      remind.Remind
+	twitch_client               twitch.Twitch
+	http_server                 http_server.Server
+	commands_mtx                sync.Mutex
+	commands                    map[string]CommandHandler
+	oauth_mtx                   sync.Mutex
+	oauth_states                map[string]string
+	last_activity               time.Time
+	commands_handled            uint64
+	queues                      queue.Manager
+	user_enqueue_rate_limit_mtx sync.Mutex
+	user_last_enqueued          map[string]time.Time
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
@@ -85,16 +87,17 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	http_server http_server.Server, http_status http_status.Status) *bot {
 
 	b := &bot{
-		seen:          seen_store,
-		urls:          urls_store,
-		mildred:       mildred,
-		remind:        remind,
-		twitch_client: twitch,
-		http_server:   http_server,
-		commands:      make(map[string]CommandHandler),
-		oauth_states:  make(map[string]string),
-		last_activity: time.Now(),
-		queues:        queue.NewManager(),
+		seen:               seen_store,
+		urls:               urls_store,
+		mildred:            mildred,
+		remind:             remind,
+		twitch_client:      twitch,
+		http_server:        http_server,
+		commands:           make(map[string]CommandHandler),
+		oauth_states:       make(map[string]string),
+		last_activity:      time.Now(),
+		queues:             queue.NewManager(),
+		user_last_enqueued: make(map[string]time.Time),
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -813,5 +816,5 @@ func (s *session) UserChannelPermissions(user_id string, channel_id string) (
 
 func (s *session) ChannelMessageSend(channel_id, msg string) (
 	*discordgo.Message, error) {
-	return s.ChannelMessageSend(channel_id, msg)
+	return s.Session.ChannelMessageSend(channel_id, msg)
 }

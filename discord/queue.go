@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"xmtp.net/xmtpbot/queue"
@@ -41,8 +42,34 @@ func (b *bot) dequeue(cmd Command) (err error) {
 		"scrimmages queue.", mention(&user{cmd.Message().Author})))
 }
 
+func (b *bot) userEnqueueRateLimitTriggered(user_id string) bool {
+	b.user_enqueue_rate_limit_mtx.Lock()
+	defer b.user_enqueue_rate_limit_mtx.Unlock()
+
+	at, ok := b.user_last_enqueued[user_id]
+	if !ok {
+		return false
+	}
+
+	return at.Add(time.Minute * 5).After(time.Now())
+}
+
+func (b *bot) userEnqueued(user_id string, at time.Time) {
+	b.user_enqueue_rate_limit_mtx.Lock()
+	defer b.user_enqueue_rate_limit_mtx.Unlock()
+
+	b.user_last_enqueued[user_id] = at
+}
+
 func (b *bot) enqueue(cmd Command) (err error) {
 	mention := mention(&user{cmd.Message().Author})
+
+	if b.userEnqueueRateLimitTriggered(cmd.Message().Author.ID) {
+		msg := fmt.Sprintf("You may enqueue at most once every 5 "+
+			"minutes, %s. Please try again later.", mention)
+		return cmd.Reply(msg)
+	}
+
 	q := b.queues.Lookup(cmd.Message().ChannelID)
 
 	err = q.Enqueue(&user{User: cmd.Message().Author})
@@ -54,6 +81,8 @@ func (b *bot) enqueue(cmd Command) (err error) {
 		}
 		return cmd.Reply(fmt.Sprintf("Error enqueueing: %s", err))
 	}
+
+	b.userEnqueued(cmd.Message().Author.ID, time.Now())
 
 	return cmd.Reply(fmt.Sprintf("Successfully added %s to the scrimmages "+
 		"queue in position %d.", mention, q.Size()))

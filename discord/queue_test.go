@@ -26,6 +26,12 @@ import (
 	url_mem "xmtp.net/xmtpbot/urls/memory"
 )
 
+const (
+	testChannelId = "987654"
+	testUserId    = "123456"
+	testUserId2   = "234567"
+)
+
 func TestDequeue(t *testing.T) {
 	test := test.New(t)
 	bot := newBot()
@@ -36,16 +42,16 @@ func TestDequeue(t *testing.T) {
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
-				ID: "foobar",
+				ID: testUserId,
 			},
-			ChannelID: "channel-foo",
+			ChannelID: testChannelId,
 		},
 	}
 
 	test.AssertNil(bot.dequeue(cmd))
 	test.AssertEqual(len(session.replies), 1)
 	assertContains(test, session.replies,
-		"Successfully removed <@!foobar> from the scrimmages queue.")
+		"Successfully removed <@!123456> from the scrimmages queue.")
 }
 
 func TestEnqueue(t *testing.T) {
@@ -58,16 +64,16 @@ func TestEnqueue(t *testing.T) {
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
-				ID: "foobar",
+				ID: testUserId,
 			},
-			ChannelID: "channel-foo",
+			ChannelID: testChannelId,
 		},
 	}
 
 	test.AssertNil(bot.enqueue(cmd))
 	test.AssertEqual(len(session.replies), 1)
 	assertContains(test, session.replies,
-		"Successfully added <@!foobar> to the scrimmages queue in position 1.")
+		"Successfully added <@!123456> to the scrimmages queue in position 1.")
 }
 
 func TestQueueClear(t *testing.T) {
@@ -80,12 +86,12 @@ func TestQueueClear(t *testing.T) {
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
-				ID: "foobar",
+				ID: testUserId,
 			},
-			ChannelID: "channel-foo",
+			ChannelID: testChannelId,
 		},
 	}
-	q := bot.queues.Lookup("channel-foo")
+	q := bot.queues.Lookup(testChannelId)
 	test.AssertEqual(bot.queueClear(q, cmd), "Permission denied.")
 
 	session.allowAll()
@@ -102,13 +108,13 @@ func TestQueueList(t *testing.T) {
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
-				ID:       "123456",
+				ID:       testUserId,
 				Username: "foobar",
 			},
-			ChannelID: "654321",
+			ChannelID: testChannelId,
 		},
 	}
-	q := bot.queues.Lookup("channel-foo")
+	q := bot.queues.Lookup(testChannelId)
 	test.AssertEqual(bot.queueList(q, cmd), "The scrimmages queue is empty.")
 
 	q.Enqueue(&user{cmd.message.Author})
@@ -126,13 +132,13 @@ func TestQueueTake(t *testing.T) {
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
-				ID:       "123456",
+				ID:       testUserId,
 				Username: "foobar",
 			},
-			ChannelID: "654321",
+			ChannelID: testChannelId,
 		},
 	}
-	q := bot.queues.Lookup("channel-foo")
+	q := bot.queues.Lookup(testChannelId)
 	test.AssertEqual(bot.queueTake(q, cmd), "Permission denied.")
 
 	session.allowAll()
@@ -145,7 +151,7 @@ func TestQueueTake(t *testing.T) {
 
 	q.Enqueue(&user{cmd.message.Author})
 	q.Enqueue(&user{&discordgo.User{
-		ID:       "234567",
+		ID:       testUserId2,
 		Username: "bazquuz",
 	}})
 	test.AssertEqual(bot.queueTake(q, cmd), "Took 2 members from the "+
@@ -153,7 +159,7 @@ func TestQueueTake(t *testing.T) {
 		"the queue.")
 
 	q.Enqueue(&user{&discordgo.User{
-		ID:       "234567",
+		ID:       testUserId2,
 		Username: "bazquuz",
 	}})
 	q.Enqueue(&user{cmd.message.Author})
@@ -163,18 +169,55 @@ func TestQueueTake(t *testing.T) {
 		"the queue.")
 }
 
+func TestEnqueueRateLimit(t *testing.T) {
+	test := test.New(t)
+	bot := newBot()
+	session := newMockSession()
+	cmd := &command{
+		name:    "enqueue",
+		args:    "",
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID:       testUserId,
+				Username: "foobar",
+			},
+			ChannelID: testChannelId,
+		},
+	}
+
+	test.AssertNil(bot.enqueue(cmd))
+	test.AssertNil(bot.enqueue(cmd))
+	assertContains(test, session.replies,
+		"Successfully added <@!123456> to the scrimmages queue in position 1.")
+	assertContains(test, session.replies,
+		"You may enqueue at most once every 5 minutes, <@!123456>. "+
+			"Please try again later.")
+
+	q := bot.queues.Lookup(testChannelId)
+	session.allowAll()
+	bot.queueClear(q, cmd)
+	session.replies = make([]string, 0)
+	bot.userEnqueued(testUserId,
+		time.Now().Add(-1*(time.Minute*5+time.Second)))
+	test.AssertNil(bot.enqueue(cmd))
+	assertContains(test, session.replies,
+		"Successfully added <@!123456> to the scrimmages queue in position 1.")
+}
+
 func newBot() *bot {
 	return &bot{
-		seen:          seen_mem.New(),
-		urls:          url_mem.New(),
-		mildred:       nil,
-		remind:        nil,
-		twitch_client: nil,
-		http_server:   nil,
-		commands:      make(map[string]CommandHandler),
-		oauth_states:  make(map[string]string),
-		last_activity: time.Now(),
-		queues:        queue.NewManager(),
+		seen:               seen_mem.New(),
+		urls:               url_mem.New(),
+		mildred:            nil,
+		remind:             nil,
+		twitch_client:      nil,
+		http_server:        nil,
+		commands:           make(map[string]CommandHandler),
+		oauth_states:       make(map[string]string),
+		last_activity:      time.Now(),
+		queues:             queue.NewManager(),
+		user_last_enqueued: make(map[string]time.Time),
 	}
 }
 
