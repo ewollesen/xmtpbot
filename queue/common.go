@@ -43,7 +43,7 @@ type Queue interface {
 	Position(key string) int
 
 	// Remove the first Queueable found with a matching key from the Queue
-	Remove(key string) error
+	Remove(key string) (Queueable, error)
 
 	// Return the size of the Queue
 	Size() int

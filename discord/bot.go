@@ -112,18 +112,18 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		help:    "reports a user's idle time",
 		handler: b.idle,
 	})
-	b.RegisterCommand("link", simpleCommand(b.lookupURL,
-		"search for a previously posted URL"))
+	// b.RegisterCommand("link", simpleCommand(b.lookupURL,
+	// 	"search for a previously posted URL"))
 	if mildred != nil {
 		b.RegisterCommand("np", simpleCommand(b.nowPlaying,
 			"report Mildred's currently playing track"))
 	}
 	b.RegisterCommand("ping", staticCommand("pong", "pong"))
 	//b.RegisterCommand("remind", &commandHandler{
-//		help: "sets a reminder. " +
-//			"Example !remind 5 minutes take out the trash",
-//		handler: b.setReminder,
-//	})
+	//		help: "sets a reminder. " +
+	//			"Example !remind 5 minutes take out the trash",
+	//		handler: b.setReminder,
+	//	})
 	b.RegisterCommand("roll", simpleCommand(dice.Roll, "roll some dice"))
 	b.RegisterCommand("seen", &commandHandler{
 		help:    "reports when a user was last seen",
@@ -135,14 +135,14 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 			"interact with twitch. Run \"!twitch help\" for "+
 				"more info"))
 	}
-	b.RegisterCommand("url", simpleCommand(b.lookupURL,
-		"search for a previously posted URL"))
+	// b.RegisterCommand("url", simpleCommand(b.lookupURL,
+	// 	"search for a previously posted URL"))
 	b.RegisterCommand("dequeue", &commandHandler{
-		help:    "leave the scrimmages queue",
+		help:    "Type: `!dequeue` to leave the scrimmages queue",
 		handler: b.dequeue,
 	})
 	b.RegisterCommand("enqueue", &commandHandler{
-		help:    "enter the scrimmages queue",
+		help:    "Type: `!enqueue MyBattleTag#1234` to enter the scrimmages queue",
 		handler: b.enqueue,
 	})
 	b.RegisterCommand("queue", &commandHandler{

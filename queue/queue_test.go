@@ -123,12 +123,15 @@ func TestRemove(t *testing.T) {
 	test := test.New(t)
 	q := New()
 
-	test.AssertErrorContains(q.Remove("foo"), NotFoundError)
+	_, err := q.Remove("foo")
+	test.AssertErrorContains(err, NotFoundError)
 
 	q.Enqueue(newQueueable("foo", "bar"))
-	test.AssertNil(q.Remove("foo"))
+	_, err = q.Remove("foo")
+	test.AssertNil(err)
 
-	test.AssertErrorContains(q.Remove("foo"), NotFoundError)
+	_, err = q.Remove("foo")
+	test.AssertErrorContains(err, NotFoundError)
 }
 
 func assertContains(t *test.Test, q *queue, id string) {

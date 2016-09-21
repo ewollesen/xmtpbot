@@ -30,6 +30,8 @@ const (
 	testChannelId = "987654"
 	testUserId    = "123456"
 	testUserId2   = "234567"
+	testBTag      = "example#1234"
+	testBTag2     = "example#2345"
 )
 
 func TestDequeue(t *testing.T) {
@@ -47,11 +49,23 @@ func TestDequeue(t *testing.T) {
 			ChannelID: testChannelId,
 		},
 	}
+	enqueue_cmd := &command{
+		name:    "enqueue",
+		args:    testBTag,
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID: testUserId,
+			},
+			ChannelID: testChannelId,
+		},
+	}
 
+	bot.enqueue(enqueue_cmd)
 	test.AssertNil(bot.dequeue(cmd))
-	test.AssertEqual(len(session.replies), 1)
+	test.AssertEqual(len(session.replies), 2)
 	assertContains(test, session.replies,
-		"Successfully removed <@!123456> from the scrimmages queue.")
+		"Successfully removed "+testBTag+" from the scrimmages queue.")
 }
 
 func TestEnqueue(t *testing.T) {
@@ -60,7 +74,7 @@ func TestEnqueue(t *testing.T) {
 	session := newMockSession()
 	cmd := &command{
 		name:    "enqueue",
-		args:    "",
+		args:    testBTag,
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
@@ -73,7 +87,14 @@ func TestEnqueue(t *testing.T) {
 	test.AssertNil(bot.enqueue(cmd))
 	test.AssertEqual(len(session.replies), 1)
 	assertContains(test, session.replies,
-		"Successfully added <@!123456> to the scrimmages queue in position 1.")
+		"Successfully added "+testBTag+" to the scrimmages queue "+
+			"in position 1.")
+
+	cmd.args = ""
+	test.AssertNil(bot.enqueue(cmd))
+	test.AssertEqual(len(session.replies), 2)
+	assertContains(test, session.replies,
+		"No BattleTag specified. Try `!enqueue example#1234`.")
 }
 
 func TestQueueClear(t *testing.T) {
@@ -117,9 +138,9 @@ func TestQueueList(t *testing.T) {
 	q := bot.queues.Lookup(testChannelId)
 	test.AssertEqual(bot.queueList(q, cmd), "The scrimmages queue is empty.")
 
-	q.Enqueue(&user{cmd.message.Author})
+	q.Enqueue(&user{User: cmd.message.Author, btag: testBTag})
 	test.AssertEqual(bot.queueList(q, cmd),
-		"The scrimmages queue contains 1 members: foobar.")
+		"The scrimmages queue contains 1 BattleTags: "+testBTag+".")
 }
 
 func TestQueueTake(t *testing.T) {
@@ -142,30 +163,30 @@ func TestQueueTake(t *testing.T) {
 	test.AssertEqual(bot.queueTake(q, cmd), "Permission denied.")
 
 	session.allowAll()
-	test.AssertEqual(bot.queueTake(q, cmd), "Took 0 members from the "+
-		"scrimmages queue. 0 members remain in the queue.")
+	test.AssertEqual(bot.queueTake(q, cmd), "Took 0 BattleTags from the "+
+		"scrimmages queue. 0 BattleTags remain in the queue.")
 
-	q.Enqueue(&user{cmd.message.Author})
-	test.AssertEqual(bot.queueTake(q, cmd), "Took 1 members from the "+
-		"scrimmages queue: <@!123456>. 0 members remain in the queue.")
+	q.Enqueue(&user{User: cmd.message.Author, btag: testBTag})
+	test.AssertEqual(bot.queueTake(q, cmd), "Took 1 BattleTags from the "+
+		"scrimmages queue: "+testBTag+". 0 BattleTags remain in the queue.")
 
-	q.Enqueue(&user{cmd.message.Author})
-	q.Enqueue(&user{&discordgo.User{
+	q.Enqueue(&user{User: cmd.message.Author, btag: testBTag})
+	q.Enqueue(&user{User: &discordgo.User{
 		ID:       testUserId2,
 		Username: "bazquuz",
-	}})
-	test.AssertEqual(bot.queueTake(q, cmd), "Took 2 members from the "+
-		"scrimmages queue: <@!123456>, <@!234567>. 0 members remain in "+
-		"the queue.")
+	}, btag: testBTag2})
+	test.AssertEqual(bot.queueTake(q, cmd), "Took 2 BattleTags from the "+
+		"scrimmages queue: "+testBTag+", "+testBTag2+". 0 BattleTags remain "+
+		"in the queue.")
 
-	q.Enqueue(&user{&discordgo.User{
+	q.Enqueue(&user{User: &discordgo.User{
 		ID:       testUserId2,
 		Username: "bazquuz",
-	}})
-	q.Enqueue(&user{cmd.message.Author})
+	}, btag: testBTag2})
+	q.Enqueue(&user{User: cmd.message.Author, btag: testBTag})
 	cmd.args = "1"
-	test.AssertEqual(bot.queueTake(q, cmd), "Took 1 members from the "+
-		"scrimmages queue: <@!234567>. 1 members remain in "+
+	test.AssertEqual(bot.queueTake(q, cmd), "Took 1 BattleTags from the "+
+		"scrimmages queue: "+testBTag2+". 1 BattleTags remain in "+
 		"the queue.")
 }
 
@@ -175,7 +196,7 @@ func TestEnqueueRateLimit(t *testing.T) {
 	session := newMockSession()
 	cmd := &command{
 		name:    "enqueue",
-		args:    "",
+		args:    testBTag,
 		session: session,
 		message: &discordgo.Message{
 			Author: &discordgo.User{
@@ -189,20 +210,58 @@ func TestEnqueueRateLimit(t *testing.T) {
 	test.AssertNil(bot.enqueue(cmd))
 	test.AssertNil(bot.enqueue(cmd))
 	assertContains(test, session.replies,
-		"Successfully added <@!123456> to the scrimmages queue in position 1.")
+		"Successfully added "+testBTag+" to the scrimmages"+
+			" queue in position 1.")
 	assertContains(test, session.replies,
 		"You may enqueue at most once every 5 minutes, <@!123456>. "+
 			"Please try again later.")
 
+	dequeue_cmd := &command{
+		name:    "dequeue",
+		args:    "",
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID:       testUserId,
+				Username: "foobar",
+			},
+			ChannelID: testChannelId,
+		},
+	}
+
+	bot.dequeue(dequeue_cmd)
 	q := bot.queues.Lookup(testChannelId)
-	session.allowAll()
-	bot.queueClear(q, cmd)
-	session.replies = make([]string, 0)
+	test.AssertEqual(q.Size(), 0)
+
 	bot.userEnqueued(testUserId,
 		time.Now().Add(-1*(time.Minute*5+time.Second)))
 	test.AssertNil(bot.enqueue(cmd))
 	assertContains(test, session.replies,
-		"Successfully added <@!123456> to the scrimmages queue in position 1.")
+		"Successfully added "+testBTag+" to the scrimmages "+
+			"queue in position 1.")
+
+	session.allowAll()
+	bot.queueClear(q, cmd)
+	session.replies = make([]string, 0)
+	test.AssertNil(bot.enqueue(cmd))
+	assertContains(test, session.replies,
+		"Successfully added "+testBTag+" to the scrimmages "+
+			"queue in position 1.")
+
+}
+
+func TestValidBattleTag(t *testing.T) {
+	test := test.New(t)
+	test.Assert(validBattleTag("example#1234"))
+	test.Assert(validBattleTag("éxample#1234"))
+
+	test.Assert(!validBattleTag("example#12345678"), "too many digits")
+	test.Assert(!validBattleTag("3example#1234"), "can't start with a digit")
+	test.Assert(!validBattleTag("exam ple#1234"), "no spaces")
+	test.Assert(!validBattleTag("example"), "no discriminator")
+	test.Assert(!validBattleTag("exam ple#"), "blank discriminator")
+	test.Assert(!validBattleTag("exam ple#ooo"), "non-digit discriminator")
+	test.Assert(!validBattleTag("tooooooooooooolong#1234"), "too long")
 }
 
 func newBot() *bot {

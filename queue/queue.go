@@ -88,23 +88,26 @@ func (q *queue) Position(key string) int {
 	return -1
 }
 
-func (q *queue) Remove(key string) error {
+func (q *queue) Remove(key string) (queueable Queueable, err error) {
 	q.mtx.Lock()
 	defer q.mtx.Unlock()
 
 	if !q.contains(key) {
-		return NotFoundError.New("")
+		return nil, NotFoundError.New("")
 	}
 
+	var removed Queueable
 	without := []Queueable{}
 	for _, candidate := range q.queueables {
-		if key != candidate.Key() {
+		if key == candidate.Key() {
+			removed = candidate
+		} else {
 			without = append(without, candidate)
 		}
 	}
 	q.queueables = without
 
-	return nil
+	return removed, nil
 }
 
 func (q *queue) Size() int {

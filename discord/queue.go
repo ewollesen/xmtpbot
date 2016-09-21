@@ -16,6 +16,7 @@ package discord
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,18 +29,29 @@ const (
 	defaultNumTaken = 12
 )
 
+var (
+	btagRe = regexp.MustCompile("^\\pL[\\pL\\pN]{2,11}#\\d{1,7}$")
+)
+
 func (b *bot) dequeue(cmd Command) (err error) {
 	q := b.queues.Lookup(cmd.Message().ChannelID)
 
-	err = q.Remove(cmd.Message().Author.ID)
+	queueable, err := q.Remove(cmd.Message().Author.ID)
 	if err != nil && !queue.NotFoundError.Contains(err) {
 		msg := fmt.Sprintf("Error removing %s from the queue: %s",
 			cmd.Message().Author.Username, err)
 		return cmd.Reply(msg)
 	}
 
+	if queueable == nil {
+		msg := fmt.Sprintf("Error: nil member removed")
+		return cmd.Reply(msg)
+	}
+
+	u := queueable.(*user)
+
 	return cmd.Reply(fmt.Sprintf("Successfully removed %s from the "+
-		"scrimmages queue.", mention(&user{cmd.Message().Author})))
+		"scrimmages queue.", u.btag))
 }
 
 func (b *bot) userEnqueueRateLimitTriggered(user_id string) bool {
@@ -62,22 +74,40 @@ func (b *bot) userEnqueued(user_id string, at time.Time) {
 }
 
 func (b *bot) enqueue(cmd Command) (err error) {
-	mention := mention(&user{cmd.Message().Author})
+	btag := ""
+	args := strings.Split(cmd.Args(), " ")
+	if len(args) > 0 && args[0] != "" {
+		btag = args[0]
+	}
+
+	if len(btag) == 0 {
+		return cmd.Reply(fmt.Sprintf("No BattleTag specified. " +
+			"Try `!enqueue example#1234`."))
+	}
+
+	if !validBattleTag(btag) {
+		return cmd.Reply(fmt.Sprintf("BattleTag appears to be invalid."))
+	}
+
+	u := &user{
+		User: cmd.Message().Author,
+		btag: btag,
+	}
 
 	if b.userEnqueueRateLimitTriggered(cmd.Message().Author.ID) {
 		msg := fmt.Sprintf("You may enqueue at most once every 5 "+
-			"minutes, %s. Please try again later.", mention)
+			"minutes, %s. Please try again later.", mention(u))
 		return cmd.Reply(msg)
 	}
 
 	q := b.queues.Lookup(cmd.Message().ChannelID)
 
-	err = q.Enqueue(&user{User: cmd.Message().Author})
+	err = q.Enqueue(u)
 	if err != nil {
 		if queue.AlreadyQueuedError.Contains(err) {
 			return cmd.Reply(fmt.Sprintf("User %s is already "+
-				"queued in position %d.",
-				mention, q.Position(cmd.Message().Author.ID)))
+				"queued as %q in position %d.",
+				mention(u), u.btag, q.Position(cmd.Message().Author.ID)))
 		}
 		return cmd.Reply(fmt.Sprintf("Error enqueueing: %s", err))
 	}
@@ -85,7 +115,7 @@ func (b *bot) enqueue(cmd Command) (err error) {
 	b.userEnqueued(cmd.Message().Author.ID, time.Now())
 
 	return cmd.Reply(fmt.Sprintf("Successfully added %s to the scrimmages "+
-		"queue in position %d.", mention, q.Size()))
+		"queue in position %d.", u.btag, q.Size()))
 }
 
 func (b *bot) queue(cmd Command) (err error) {
@@ -125,7 +155,7 @@ func (b *bot) queue(cmd Command) (err error) {
 }
 
 func (b *bot) queueHelp(q queue.Queue, cmd Command) string {
-	return "Manipulates the scrimmages queue.\n`!dequeue` -- remove yourself from the scrimmages queue\n`!enqueue` -- add yourself to the scrimmages queue\n`!queue clear` -- clear the scrimmages queue\n`!queue list` -- list the members of the scrimmages queue\n`!queue pick <n>` -- removes the first `n` members from the scrimmages queue"
+	return "Manipulates the scrimmages queue.\n`!dequeue` -- remove yourself from the scrimmages queue\n`!enqueue MyBattleTag#1234` -- add your BattleTag to the scrimmages queue\n`!queue clear` -- clear the scrimmages queue\n`!queue list` -- list the BattleTags of the scrimmages queue\n`!queue pick <n>` -- removes the first `n` BattleTags from the scrimmages queue"
 }
 
 func (b *bot) queueClear(q queue.Queue, cmd Command) string {
@@ -142,6 +172,9 @@ func (b *bot) queueClear(q queue.Queue, cmd Command) string {
 	if err := q.Clear(); err != nil {
 		return fmt.Sprintf("Error clearing the scrimmages queue: %s", err)
 	}
+	if err = b.clearUserLastEnqueued(); err != nil {
+		logger.Errore(err)
+	}
 
 	return "Scrimmages queue cleared."
 }
@@ -156,9 +189,9 @@ func (b *bot) queueList(q queue.Queue, cmd Command) string {
 	if len(users) > 0 {
 		names := []string{}
 		for _, u := range users {
-			names = append(names, u.(*user).Username)
+			names = append(names, u.(*user).btag)
 		}
-		return fmt.Sprintf("The scrimmages queue contains %d members: %s.",
+		return fmt.Sprintf("The scrimmages queue contains %d BattleTags: %s.",
 			len(names), strings.Join(names, ", "))
 	} else {
 		return "The scrimmages queue is empty."
@@ -191,18 +224,18 @@ func (b *bot) queueTake(q queue.Queue, cmd Command) string {
 			"scrimmages queues: %s", num, err)
 	}
 
-	mentions := []string{}
+	btags := []string{}
 	for _, queueable := range taken {
 		u := queueable.(*user)
-		mentions = append(mentions, mention(u))
+		btags = append(btags, u.btag)
 	}
-	msg := fmt.Sprintf("Took %d members from the scrimmages queue", len(taken))
+	msg := fmt.Sprintf("Took %d BattleTags from the scrimmages queue", len(taken))
 	if len(taken) > 0 {
-		msg += fmt.Sprintf(": %s.", strings.Join(mentions, ", "))
+		msg += fmt.Sprintf(": %s.", strings.Join(btags, ", "))
 	} else {
 		msg += "."
 	}
-	msg += fmt.Sprintf(" %d members remain in the queue.", q.Size())
+	msg += fmt.Sprintf(" %d BattleTags remain in the queue.", q.Size())
 
 	return msg
 }
@@ -231,8 +264,22 @@ func userPermittedTo(cmd Command, perm int) (bool, error) {
 
 type user struct {
 	*discordgo.User
+	btag string
 }
 
 func (u *user) Key() string {
 	return u.ID
+}
+
+func (b *bot) clearUserLastEnqueued() (err error) {
+	b.user_enqueue_rate_limit_mtx.Lock()
+	defer b.user_enqueue_rate_limit_mtx.Unlock()
+
+	b.user_last_enqueued = make(map[string]time.Time)
+
+	return nil
+}
+
+func validBattleTag(btag string) bool {
+	return btagRe.MatchString(btag)
 }
