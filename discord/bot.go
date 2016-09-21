@@ -119,11 +119,11 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 			"report Mildred's currently playing track"))
 	}
 	b.RegisterCommand("ping", staticCommand("pong", "pong"))
-	b.RegisterCommand("remind", &commandHandler{
-		help: "sets a reminder. " +
-			"Example !remind 5 minutes take out the trash",
-		handler: b.setReminder,
-	})
+	//b.RegisterCommand("remind", &commandHandler{
+//		help: "sets a reminder. " +
+//			"Example !remind 5 minutes take out the trash",
+//		handler: b.setReminder,
+//	})
 	b.RegisterCommand("roll", simpleCommand(dice.Roll, "roll some dice"))
 	b.RegisterCommand("seen", &commandHandler{
 		help:    "reports when a user was last seen",
