@@ -86,7 +86,7 @@ func (b *bot) enqueue(cmd Command) (err error) {
 	}
 
 	if !validBattleTag(btag) {
-		return cmd.Reply(fmt.Sprintf("BattleTag appears to be invalid."))
+		return cmd.Reply(fmt.Sprintf("BattleTag %q appears to be invalid.", btag))
 	}
 
 	u := &user{
