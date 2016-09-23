@@ -28,6 +28,7 @@ import (
 
 const (
 	testChannelId = "987654"
+	testGuildId   = "765432"
 	testUserId    = "123456"
 	testUserId2   = "234567"
 	testBTag      = "example#1234"
@@ -95,6 +96,12 @@ func TestEnqueue(t *testing.T) {
 	test.AssertEqual(len(session.replies), 2)
 	assertContains(test, session.replies,
 		"No BattleTag specified. Try `!enqueue example#1234`.")
+
+	cmd.args = testBTag
+	test.AssertNil(bot.enqueue(cmd))
+	test.AssertEqual(len(session.replies), 3)
+	assertContains(test, session.replies,
+		"User <@!123456> is already queued as \"example#1234\" in position 1.")
 }
 
 func TestQueueClear(t *testing.T) {
@@ -112,7 +119,8 @@ func TestQueueClear(t *testing.T) {
 			ChannelID: testChannelId,
 		},
 	}
-	q := bot.queues.Lookup(testChannelId)
+	q, err := bot.lookupQueue(testChannelId, cmd.Session())
+	test.AssertNil(err)
 	test.AssertEqual(bot.queueClear(q, cmd), "Permission denied.")
 
 	session.allowAll()
@@ -135,7 +143,8 @@ func TestQueueList(t *testing.T) {
 			ChannelID: testChannelId,
 		},
 	}
-	q := bot.queues.Lookup(testChannelId)
+	q, err := bot.lookupQueue(testChannelId, cmd.Session())
+	test.AssertNil(err)
 	test.AssertEqual(bot.queueList(q, cmd), "The scrimmages queue is empty.")
 
 	q.Enqueue(&user{User: cmd.message.Author, btag: testBTag})
@@ -159,7 +168,8 @@ func TestQueueTake(t *testing.T) {
 			ChannelID: testChannelId,
 		},
 	}
-	q := bot.queues.Lookup(testChannelId)
+	q, err := bot.lookupQueue(testChannelId, cmd.Session())
+	test.AssertNil(err)
 	test.AssertEqual(bot.queueTake(q, cmd), "Permission denied.")
 
 	session.allowAll()
@@ -207,15 +217,6 @@ func TestEnqueueRateLimit(t *testing.T) {
 		},
 	}
 
-	test.AssertNil(bot.enqueue(cmd))
-	test.AssertNil(bot.enqueue(cmd))
-	assertContains(test, session.replies,
-		"Successfully added "+testBTag+" to the scrimmages"+
-			" queue in position 1.")
-	assertContains(test, session.replies,
-		"You may enqueue at most once every 5 minutes, <@!123456>. "+
-			"Please try again later.")
-
 	dequeue_cmd := &command{
 		name:    "dequeue",
 		args:    "",
@@ -229,8 +230,19 @@ func TestEnqueueRateLimit(t *testing.T) {
 		},
 	}
 
+	test.AssertNil(bot.enqueue(cmd))
 	bot.dequeue(dequeue_cmd)
-	q := bot.queues.Lookup(testChannelId)
+	test.AssertNil(bot.enqueue(cmd))
+	assertContains(test, session.replies,
+		"Successfully added "+testBTag+" to the scrimmages"+
+			" queue in position 1.")
+	assertContains(test, session.replies,
+		"You may enqueue at most once every 5 minutes, <@!123456>. "+
+			"Please try again later.")
+
+	bot.dequeue(dequeue_cmd)
+	q, err := bot.lookupQueue(testChannelId, cmd.Session())
+	test.AssertNil(err)
 	test.AssertEqual(q.Size(), 0)
 
 	bot.userEnqueued(testUserId,
@@ -305,6 +317,10 @@ func (s *mockSession) ChannelMessageSend(channel_id, msg string) (
 	*discordgo.Message, error) {
 	s.replies = append(s.replies, msg)
 	return nil, nil
+}
+
+func (s *mockSession) GuildIdFromChannelId(channel_id string) (string, error) {
+	return testGuildId, nil
 }
 
 func assertContains(test *test.Test, container []string, content string,

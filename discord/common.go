@@ -26,6 +26,7 @@ type Command interface {
 
 type Session interface {
 	ChannelMessageSend(channel_id, msg string) (*discordgo.Message, error)
+	GuildIdFromChannelId(channel_id string) (string, error)
 	UserChannelPermissions(user_id string, channel_id string) (perms int,
 		err error)
 }

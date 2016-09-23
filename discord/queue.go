@@ -34,7 +34,11 @@ var (
 )
 
 func (b *bot) dequeue(cmd Command) (err error) {
-	q := b.queues.Lookup(cmd.Message().ChannelID)
+	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
+	if err != nil {
+		logger.Errore(err)
+		return cmd.Reply(fmt.Sprintf("Error looking up guild: %s", err))
+	}
 
 	queueable, err := q.Remove(cmd.Message().Author.ID)
 	if err != nil && !queue.NotFoundError.Contains(err) {
@@ -94,13 +98,23 @@ func (b *bot) enqueue(cmd Command) (err error) {
 		btag: btag,
 	}
 
+	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
+	if err != nil {
+		logger.Errore(err)
+		return cmd.Reply(fmt.Sprintf("Error looking up guild: %s", err))
+	}
+
+	pos := q.Position(cmd.Message().Author.ID)
+	if pos > -1 {
+		return cmd.Reply(fmt.Sprintf("User %s is already "+
+			"queued as %q in position %d.", mention(u), u.btag, pos))
+	}
+
 	if b.userEnqueueRateLimitTriggered(cmd.Message().Author.ID) {
 		msg := fmt.Sprintf("You may enqueue at most once every 5 "+
 			"minutes, %s. Please try again later.", mention(u))
 		return cmd.Reply(msg)
 	}
-
-	q := b.queues.Lookup(cmd.Message().ChannelID)
 
 	err = q.Enqueue(u)
 	if err != nil {
@@ -132,7 +146,11 @@ func (b *bot) queue(cmd Command) (err error) {
 	if len(pieces) > 2 {
 		subcommand.args = pieces[2]
 	}
-	q := b.queues.Lookup(cmd.Message().ChannelID)
+	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
+	if err != nil {
+		logger.Errore(err)
+		return cmd.Reply(fmt.Sprintf("Error looking up guild: %s", err))
+	}
 
 	switch cmd_name {
 	case "", "help":
@@ -282,4 +300,15 @@ func (b *bot) clearUserLastEnqueued() (err error) {
 
 func validBattleTag(btag string) bool {
 	return btagRe.MatchString(btag)
+}
+
+func (b *bot) lookupQueue(channel_id string, session Session) (queue.Queue,
+	error) {
+
+	guild_id, err := session.GuildIdFromChannelId(channel_id)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.queues.Lookup(guild_id), nil
 }

@@ -818,3 +818,14 @@ func (s *session) ChannelMessageSend(channel_id, msg string) (
 	*discordgo.Message, error) {
 	return s.Session.ChannelMessageSend(channel_id, msg)
 }
+
+func (s *session) GuildIdFromChannelId(channel_id string) (guild_id string,
+	err error) {
+
+	ch, err := s.Session.Channel(channel_id)
+	if err != nil {
+		return "", err
+	}
+
+	return ch.GuildID, nil
+}
