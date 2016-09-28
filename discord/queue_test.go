@@ -15,15 +15,17 @@
 package discord
 
 import (
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
-
+	"github.com/ewollesen/discordgo"
 	"xmtp.net/xmtpbot/queue"
 	seen_mem "xmtp.net/xmtpbot/seen/memory"
 	"xmtp.net/xmtpbot/test"
 	url_mem "xmtp.net/xmtpbot/urls/memory"
+	"xmtp.net/xmtpbot/util"
 )
 
 const (
@@ -276,6 +278,112 @@ func TestValidBattleTag(t *testing.T) {
 	test.Assert(!validBattleTag("tooooooooooooolong#1234"), "too long")
 }
 
+func TestIdentifyRoleDefaultsToDPS(t *testing.T) {
+	test := test.New(t)
+	bot := newBot()
+	session := newMockSession()
+	cmd := &command{
+		name:    "role",
+		args:    "",
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID:       testUserId,
+				Username: "foobar",
+			},
+			ChannelID: testChannelId,
+		},
+	}
+	bot.initBoltDb(util.OpenBoltDB("test-bolt.db")) // FIXME: ugly
+	defer func() {
+		os.Remove("test-bolt.db")
+	}()
+
+	test.AssertEqual(bot.queueIdentifyRole(nil, cmd),
+		fmt.Sprintf("Roles matched by \"foobar\": DPS: %s, "+
+			"Support: %s, Tank: %s",
+			symbolChecked, symbolSaltire, symbolSaltire))
+}
+
+func TestIdentifyRolePerformsServerLookup(t *testing.T) {
+	test := test.New(t)
+	bot := newBot()
+	session := newMockSession()
+	cmd := &command{
+		name:    "role",
+		args:    "",
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID:       testUserId,
+				Username: "foobar",
+			},
+			ChannelID: testChannelId,
+		},
+	}
+	bot.initBoltDb(util.OpenBoltDB("test-bolt.db")) // FIXME: ugly
+	defer func() {
+		os.Remove("test-bolt.db")
+	}()
+
+	session.appendMemberNicks("foobar [tank]")
+	test.AssertEqual(bot.queueIdentifyRole(nil, cmd),
+		fmt.Sprintf("Roles matched by \"foobar [tank]\": DPS: %s, "+
+			"Support: %s, Tank: %s",
+			symbolSaltire, symbolSaltire, symbolChecked))
+}
+
+func TestIdentifyRolePerformsCacheLookup(t *testing.T) {
+	test := test.New(t)
+	bot := newBot()
+	session := newMockSession()
+	cmd := &command{
+		name:    "role",
+		args:    "",
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID:       testUserId,
+				Username: "foobar",
+			},
+			ChannelID: testChannelId,
+		},
+	}
+	bot.initBoltDb(util.OpenBoltDB("test-bolt.db")) // FIXME: ugly
+	defer func() {
+		os.Remove("test-bolt.db")
+	}()
+
+	bot.cacheNick(testUserId, "foobar [flex]")
+	test.AssertEqual(bot.queueIdentifyRole(nil, cmd),
+		fmt.Sprintf("Roles matched by \"foobar [flex]\": DPS: %s, "+
+			"Support: %s, Tank: %s",
+			symbolChecked, symbolChecked, symbolChecked))
+}
+
+func TestRoles(t *testing.T) {
+	test := test.New(t)
+	bot := newBot()
+	session := newMockSession()
+	cmd := &command{
+		name:    "roles",
+		args:    "",
+		session: session,
+		message: &discordgo.Message{
+			Author: &discordgo.User{
+				ID:       testUserId,
+				Username: "foobar",
+			},
+			ChannelID: testChannelId,
+		},
+	}
+	q, err := bot.lookupQueue(testChannelId, cmd.Session())
+	test.AssertNil(err)
+
+	test.AssertEqual(bot.queueRoles(q, cmd),
+		"Roles queued in the scrimmages queue:\nTanks:\nSupports:\nDPSes:")
+}
+
 func newBot() *bot {
 	return &bot{
 		seen:               seen_mem.New(),
@@ -289,23 +397,42 @@ func newBot() *bot {
 		last_activity:      time.Now(),
 		queues:             queue.NewManager(),
 		user_last_enqueued: make(map[string]time.Time),
+		bolt_db:            nil,
 	}
 }
 
 type mockSession struct {
 	perms   int
 	replies []string
+	nicks   []string
 }
 
 func newMockSession() *mockSession {
 	return &mockSession{
 		perms:   0,
 		replies: make([]string, 0),
+		nicks:   make([]string, 0),
 	}
 }
 
 func (s *mockSession) allowAll() {
 	s.perms = 0xfffffffffffffff
+}
+
+func (s *mockSession) appendMemberNicks(nicks ...string) {
+	s.nicks = append(s.nicks, nicks...)
+}
+
+func (s *mockSession) Member(guild_id, user_id string) (*discordgo.Member, error) {
+	nick := ""
+	if len(s.nicks) > 0 {
+		nick = s.nicks[0]
+		s.nicks = s.nicks[1:]
+	}
+
+	return &discordgo.Member{
+		Nick: nick,
+	}, nil
 }
 
 func (s *mockSession) UserChannelPermissions(user_id, channel_id string) (

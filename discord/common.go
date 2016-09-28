@@ -14,7 +14,7 @@
 
 package discord
 
-import "github.com/bwmarrin/discordgo"
+import "github.com/ewollesen/discordgo"
 
 type Command interface {
 	Name() string
@@ -27,6 +27,7 @@ type Command interface {
 type Session interface {
 	ChannelMessageSend(channel_id, msg string) (*discordgo.Message, error)
 	GuildIdFromChannelId(channel_id string) (string, error)
+	Member(guild_id, user_id string) (*discordgo.Member, error)
 	UserChannelPermissions(user_id string, channel_id string) (perms int,
 		err error)
 }

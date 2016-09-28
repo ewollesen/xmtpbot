@@ -17,8 +17,19 @@ package util
 import (
 	"encoding/base64"
 	"math/rand"
+	"os"
 	"strings"
+
+	"github.com/boltdb/bolt"
+	"github.com/spacemonkeygo/spacelog"
+	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
 )
+
+var logger = spacelog.GetLoggerNamed("util")
+
+func init() {
+	spacelog_setup.MustSetup("util")
+}
 
 func EscapeMarkdown(input string) string {
 	input = strings.Replace(input, "_", "\\_", -1)
@@ -35,4 +46,14 @@ func RandomState(bytes int) (state string, err error) {
 	}
 
 	return base64.URLEncoding.EncodeToString(buf), nil
+}
+
+func OpenBoltDB(db_path string) *bolt.DB {
+	db, err := bolt.Open(db_path, 0600, nil)
+	if err != nil {
+		logger.Errore(err)
+		os.Exit(1)
+	}
+
+	return db
 }

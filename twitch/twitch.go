@@ -27,21 +27,18 @@ import (
 	"strings"
 	"time"
 
-	"xmtp.net/xmtpbot/config"
-	"xmtp.net/xmtpbot/store"
-	"xmtp.net/xmtpbot/util"
-
 	"github.com/gorilla/mux"
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
+	"xmtp.net/xmtpbot/store"
+	"xmtp.net/xmtpbot/util"
 )
 
 var (
 	storeType = flag.String("twitch.store_type", "json",
 		"twitch storage backend type")
-	storeFilename = flag.String("twitch.store_filename",
-		path.Join(*config.Dir, "twitch.json"),
-		"filename in which to store twitch data")
+	storeFilename = flag.String("twitch.store_filename", "twitch.json",
+		"filename in which to store twitch data (relative to config_dir)")
 	clientId = flag.String("twitch.client_id", "",
 		"twitch app client id")
 	clientSecret = flag.String("twitch.client_secret", "",
@@ -407,8 +404,8 @@ func (t *twitch) Follow(names ...string) string {
 	return "OK"
 }
 
-func Setup() Twitch {
-	return New(store.New(*storeFilename))
+func Setup(dir string) Twitch {
+	return New(store.New(path.Join(dir, *storeFilename)))
 }
 
 type ChannelByName []Channel

@@ -16,22 +16,24 @@ package discord
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/boltdb/bolt"
+	"github.com/ewollesen/discordgo"
 	"github.com/gorilla/mux"
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
-
 	"xmtp.net/xmtpbot/dice"
 	"xmtp.net/xmtpbot/dur"
 	"xmtp.net/xmtpbot/fortune"
@@ -47,6 +49,12 @@ import (
 	"xmtp.net/xmtpbot/util"
 )
 
+const (
+	bucketNicks      = "discord.nicks"
+	bucketRoles      = "discord.roles"
+	bucketBattleTags = "discord.battleTags"
+)
+
 var (
 	token    = flag.String("discord.token", "", "Discord bot API token")
 	clientId = flag.String("discord.client_id", "",
@@ -57,7 +65,15 @@ var (
 		"Hostname for discord oauth redirects")
 	protocol = flag.String("discord.protocol", "https",
 		"Protocol for discord oauth redirects")
-	game   = flag.String("discord.game", "!help", "Game being played")
+	game = flag.String("discord.game", "!help", "Game being played")
+
+	roleRe     = regexp.MustCompile("\\[([^\\]]+)\\]")
+	roleTankRe = regexp.MustCompile("(?i:\\b(tank|d\\.?va|rein(hardt)?|(roadhog|road|hog)|wins(ton)?|zarya)\\b)")
+	roleDPSRe  = regexp.MustCompile("(?i:\\b(dps|dam(age)?)\\b)")
+	// Intentionally not including symmetra, cuz I'm a dick
+	roleSupportRe = regexp.MustCompile("(?i:\\b(supp(ort)?|heal(er|s|z)?|ana|lucio|mercy|zen(yatta)?)\\b)")
+	roleFlexRe    = regexp.MustCompile("(?i:\\b(any|fill|flex)\\b)")
+
 	logger = spacelog.GetLogger()
 
 	DiscordError = errors.NewClass("discord")
@@ -81,11 +97,13 @@ type bot struct {
 	queues                      queue.Manager
 	user_enqueue_rate_limit_mtx sync.Mutex
 	user_last_enqueued          map[string]time.Time
+	bolt_db                     *bolt.DB
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	remind remind.Remind, twitch twitch.Twitch,
-	http_server http_server.Server, http_status http_status.Status) *bot {
+	http_server http_server.Server, http_status http_status.Status,
+	bolt_db *bolt.DB) *bot {
 
 	b := &bot{
 		seen:               seen_store,
@@ -99,6 +117,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		last_activity:      time.Now(),
 		queues:             queue.NewManager(),
 		user_last_enqueued: make(map[string]time.Time),
+		bolt_db:            bolt_db,
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -152,6 +171,10 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		handler: b.queue,
 	})
 	http_status.Register("discord", b.Status)
+
+	if b.bolt_db != nil {
+		b.initBoltDb(b.bolt_db)
+	}
 
 	return b
 }
@@ -372,6 +395,10 @@ func (b *bot) myDiscordUserId(s *discordgo.Session) string {
 }
 
 func (b *bot) presenceHandler(s *discordgo.Session, p *discordgo.PresenceUpdate) {
+	if p.Nick != "" {
+		b.cacheNick(p.User.ID, p.Nick)
+		b.cacheRole(p.User.ID, p.Nick)
+	}
 	logger.Warne(b.markSeen(p.User.Username))
 }
 
@@ -815,6 +842,10 @@ type session struct {
 	*discordgo.Session
 }
 
+func (s *session) Member(guild_id, user_id string) (*discordgo.Member, error) {
+	return s.State.Member(guild_id, user_id)
+}
+
 func (s *session) UserChannelPermissions(user_id string, channel_id string) (
 	perms int, err error) {
 	return s.State.UserChannelPermissions(user_id, channel_id)
@@ -834,4 +865,98 @@ func (s *session) GuildIdFromChannelId(channel_id string) (guild_id string,
 	}
 
 	return ch.GuildID, nil
+}
+
+func (b *bot) cacheNick(user_id, nick string) error {
+	if nick == "" {
+		return nil
+	}
+
+	if b.bolt_db == nil {
+		return nil
+	}
+
+	return b.bolt_db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketNicks))
+		return b.Put([]byte(user_id), []byte(nick))
+	})
+}
+
+func (b *bot) cacheRole(user_id, nick string) error {
+	if b.bolt_db == nil {
+		return nil
+	}
+
+	roles := extractRoles(nick)
+
+	return b.bolt_db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketRoles))
+		roles_json_bytes, err := json.Marshal(roles)
+		if err != nil {
+			return err
+		}
+
+		return b.Put([]byte(user_id), []byte(roles_json_bytes))
+	})
+}
+
+type roles struct {
+	DPS     bool `json:"dps"`
+	Support bool `json:"support"`
+	Tank    bool `json:"tank"`
+}
+
+func (r *roles) hasRole() bool {
+	return r.Tank || r.DPS || r.Support
+}
+
+func extractRoles(nick string) *roles {
+	matches := roleRe.FindAllStringSubmatch(nick, -1)
+	roles := &roles{}
+
+	for _, match := range matches {
+		for _, role := range match {
+			if roleTankRe.MatchString(role) {
+				roles.Tank = true
+			}
+			if roleDPSRe.MatchString(role) {
+				roles.DPS = true
+			}
+			if roleSupportRe.MatchString(role) {
+				roles.Support = true
+			}
+			if roleFlexRe.MatchString(role) {
+				roles.DPS = true
+				roles.Support = true
+				roles.Tank = true
+			}
+		}
+	}
+
+	if !roles.hasRole() {
+		logger.Infof("defaulting role for %q to DPS", nick)
+		roles.DPS = true
+	}
+
+	return roles
+}
+
+func (b *bot) initBoltDb(db *bolt.DB) {
+	b.bolt_db = db
+	db.Update(func(tx *bolt.Tx) (err error) {
+		_, err = tx.CreateBucketIfNotExists([]byte(bucketNicks))
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte(bucketRoles))
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte(bucketBattleTags))
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 }

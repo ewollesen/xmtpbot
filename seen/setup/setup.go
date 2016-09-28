@@ -22,11 +22,7 @@ import (
 	"xmtp.net/xmtpbot/seen/memory"
 )
 
-func NewStore() seen.Store {
-	return NewStoreFromFilename(*seen.StoreFilename)
-}
-
-func NewStoreFromFilename(filename string) seen.Store {
+func NewStore(filename string) seen.Store {
 	switch strings.ToLower(*seen.StoreType) {
 	case "json":
 		return json.New(filename)

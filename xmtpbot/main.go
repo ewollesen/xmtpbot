@@ -24,8 +24,6 @@ import (
 	"github.com/spacemonkeygo/flagfile"
 	"github.com/spacemonkeygo/spacelog"
 	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
-
-	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/discord"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/http_status"
@@ -38,7 +36,9 @@ import (
 )
 
 var (
-	defaultFlagfile = os.ExpandEnv("$HOME/.xmtpbot/config")
+	configDir = flag.String("config_dir", os.ExpandEnv("$HOME/.xmtpbot"),
+		"directory in which to store config and state")
+	defaultFlagfile = path.Join(*configDir, "config")
 
 	logger = spacelog.GetLoggerNamed("xmtpbot")
 )
@@ -55,20 +55,19 @@ func main() {
 	var wg sync.WaitGroup
 
 	discord_bot := discord.New(
-		urls_setup.NewStore(),
-		seen_setup.NewStore(),
+		urls_setup.NewStore(path.Join(*configDir, "urls.json")),
+		seen_setup.NewStore(path.Join(*configDir, "seen.json")),
 		mildred.New(),
 		remind.New(),
-		twitch.Setup(),
+		twitch.Setup(*configDir),
 		http_server,
-		http_status)
+		http_status,
+		nil)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 
 	slack_bot := slack.New(
-		urls_setup.NewStoreFromFilename(
-			path.Join(*config.Dir, "slack-urls.json")),
-		seen_setup.NewStoreFromFilename(
-			path.Join(*config.Dir, "slack-seen.json")),
+		urls_setup.NewStore(path.Join(*configDir, "slack-urls.json")),
+		seen_setup.NewStore(path.Join(*configDir, "slack-seen.json")),
 		mildred.New(),
 		http_server,
 		http_status)

@@ -16,18 +16,14 @@ package seen
 
 import (
 	"flag"
-	"path"
 	"time"
-
-	"xmtp.net/xmtpbot/config"
 )
 
 var (
 	StoreType = flag.String("seen.store_type", "json",
 		"seen storage backend type")
-	StoreFilename = flag.String("seen.store_filename",
-		path.Join(*config.Dir, "seen.json"),
-		"filename in which to store last seen records")
+	StoreFilename = flag.String("seen.store_filename", "seen.json",
+		"filename in which to store last seen records (relative to config_dir)")
 )
 
 type Store interface {

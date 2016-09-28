@@ -24,18 +24,21 @@ import (
 	"github.com/spacemonkeygo/flagfile"
 	"github.com/spacemonkeygo/spacelog"
 	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
-
-	"xmtp.net/xmtpbot/config"
 	"xmtp.net/xmtpbot/discord"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/http_status"
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
 	urls_setup "xmtp.net/xmtpbot/urls/setup"
+	"xmtp.net/xmtpbot/util"
 )
 
 var (
-	defaultFlagfile = os.ExpandEnv("$HOME/.zenbot/config")
+	configDir = flag.String("config_dir", os.ExpandEnv("$HOME/.zenbot"),
+		"directory in which to store config and state")
+	defaultFlagfile = path.Join(*configDir, "config")
+	boltDBPath      = flag.String("db_path", "data.db",
+		"Path to write database data into (relative to config_dir)")
 
 	logger = spacelog.GetLoggerNamed("zenbot")
 )
@@ -49,18 +52,18 @@ func main() {
 	shutdown := make(chan bool)
 	http_server := http_server.New()
 	http_status := http_status.New(http_server)
+	bolt_db := util.OpenBoltDB(path.Join(*configDir, *boltDBPath))
 	var wg sync.WaitGroup
 
 	discord_bot := discord.New(
-		urls_setup.NewStoreFromFilename(
-			path.Join(*config.Dir, "urls.json")),
-		seen_setup.NewStoreFromFilename(
-			path.Join(*config.Dir, "seen.json")),
+		urls_setup.NewStore(path.Join(*configDir, "urls.json")),
+		seen_setup.NewStore(path.Join(*configDir, "seen.json")),
 		nil,
 		remind.New(),
 		nil,
 		http_server,
-		http_status)
+		http_status,
+		bolt_db)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 	logger.Errore(http_status.Run(shutdown, &wg))
 

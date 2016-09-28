@@ -21,7 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/boltdb/bolt"
+	"github.com/ewollesen/discordgo"
 	"xmtp.net/xmtpbot/queue"
 )
 
@@ -30,7 +31,9 @@ const (
 )
 
 var (
-	btagRe = regexp.MustCompile("^\\pL[\\pL\\pN]{2,11}#\\d{1,7}$")
+	btagRe        = regexp.MustCompile("^\\pL[\\pL\\pN]{2,11}#\\d{1,7}$")
+	symbolChecked = string([]byte{0xe2, 0x9c, 0x93})
+	symbolSaltire = string([]byte{0xe2, 0x98, 0x93})
 )
 
 func (b *bot) dequeue(cmd Command) (err error) {
@@ -161,10 +164,14 @@ func (b *bot) queue(cmd Command) (err error) {
 		msg = "Try `!dequeue` instead, this will be implemented later."
 	case "enqueue", "add":
 		msg = "Try `!enqueue` instead, this will be implemented later."
+	case "id", "identify":
+		msg = b.queueIdentifyRole(q, subcommand)
 	case "list", "show":
 		msg = b.queueList(q, subcommand)
 	case "take", "pick", "grab":
 		msg = b.queueTake(q, subcommand)
+	case "role", "roles":
+		msg = b.queueRoles(q, subcommand)
 	default:
 		msg = fmt.Sprintf("Unhandled scrimmages queue command: %q", cmd.Args())
 	}
@@ -173,7 +180,7 @@ func (b *bot) queue(cmd Command) (err error) {
 }
 
 func (b *bot) queueHelp(q queue.Queue, cmd Command) string {
-	return "Manipulates the scrimmages queue.\n`!dequeue` -- remove yourself from the scrimmages queue\n`!enqueue MyBattleTag#1234` -- add your BattleTag to the scrimmages queue\n`!queue clear` -- clear the scrimmages queue\n`!queue list` -- list the BattleTags of the scrimmages queue\n`!queue pick <n>` -- removes the first `n` BattleTags from the scrimmages queue"
+	return "Manipulates the scrimmages queue.\n`!dequeue` -- remove yourself from the scrimmages queue\n`!enqueue MyBattleTag#1234` -- add your BattleTag to the scrimmages queue\n`!queue clear` -- clear the scrimmages queue\n`!queue list` -- list the BattleTags of the scrimmages queue\n`!queue pick <n>` -- removes the first `n` BattleTags from the scrimmages queue\n`!queue identify` -- display the roles that your nickname matches (ie DPS, support, or tank)"
 }
 
 func (b *bot) queueClear(q queue.Queue, cmd Command) string {
@@ -258,6 +265,44 @@ func (b *bot) queueTake(q queue.Queue, cmd Command) string {
 	return msg
 }
 
+func (b *bot) queueIdentifyRole(q queue.Queue, cmd Command) string {
+	guild_id, err := cmd.Session().GuildIdFromChannelId(
+		cmd.Message().ChannelID)
+	if err != nil {
+		logger.Errore(err)
+		return "Error identifying roles."
+	}
+	nick := b.lookupNick(guild_id, cmd.Message().Author.ID, cmd.Session())
+	if nick == "" {
+		nick = cmd.Message().Author.Username
+	}
+	roles := extractRoles(nick)
+	dps := symbolSaltire
+	if roles.DPS {
+		dps = symbolChecked
+	}
+	support := symbolSaltire
+	if roles.Support {
+		support = symbolChecked
+	}
+	tank := symbolSaltire
+	if roles.Tank {
+		tank = symbolChecked
+	}
+	msg := fmt.Sprintf("Roles matched by %q: DPS: %s, Support: %s, Tank: %s",
+		nick, dps, support, tank)
+	return msg
+}
+
+func (b *bot) queueRoles(q queue.Queue, cmd Command) string {
+	tanks := "Tanks:"
+	supports := "Supports:"
+	dps := "DPSes:"
+
+	return "Roles queued in the scrimmages queue:\n" +
+		strings.Join([]string{tanks, supports, dps}, "\n")
+}
+
 func mention(u *user) string {
 	return fmt.Sprintf("<@!%s>", u.ID)
 }
@@ -311,4 +356,38 @@ func (b *bot) lookupQueue(channel_id string, session Session) (queue.Queue,
 	}
 
 	return b.queues.Lookup(guild_id), nil
+}
+
+func (b *bot) lookupNick(guild_id, user_id string, session Session) (nick string) {
+	b.bolt_db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucketNicks))
+		nick = string(b.Get([]byte(user_id)))
+		return nil
+	})
+
+	var err error
+	if nick == "" {
+		nick, err = b.fetchNick(guild_id, user_id, session)
+		if err != nil {
+			logger.Errore(err)
+			return ""
+		}
+	}
+
+	logger.Debugf("looked up %q and found %q", user_id, nick)
+	return nick
+}
+
+func (b *bot) fetchNick(guild_id, user_id string, session Session) (nick string,
+	err error) {
+
+	member, err := session.Member(guild_id, user_id)
+	if err != nil {
+		return "", err
+	}
+	if member.Nick != "" {
+		logger.Errore(b.cacheNick(user_id, member.Nick))
+	}
+
+	return member.Nick, nil
 }

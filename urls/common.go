@@ -16,12 +16,9 @@ package urls
 
 import (
 	"flag"
-	"path"
 	"regexp"
 
 	"github.com/spacemonkeygo/spacelog"
-
-	"xmtp.net/xmtpbot/config"
 )
 
 const (
@@ -31,9 +28,8 @@ const (
 var (
 	StoreType = flag.String("urls.store_type", "json",
 		"URL storage backend type")
-	StoreFilename = flag.String("urls.store_filename",
-		path.Join(*config.Dir, "urls.json"),
-		"filename in which to store collected URLs")
+	StoreFilename = flag.String("urls.store_filename", "urls.json",
+		"filename in which to store collected URLs (relative to config_dir)")
 
 	URLRegexp = regexp.MustCompile(urlRe)
 
