@@ -57,6 +57,7 @@ var (
 		"Hostname for discord oauth redirects")
 	protocol = flag.String("discord.protocol", "https",
 		"Protocol for discord oauth redirects")
+	game   = flag.String("discord.game", "!help", "Game being played")
 	logger = spacelog.GetLogger()
 
 	DiscordError = errors.NewClass("discord")
@@ -162,6 +163,11 @@ func (b *bot) Run(shutdown chan bool, wg *sync.WaitGroup) (err error) {
 	}
 	wg.Add(1)
 	logger.Info("online")
+
+	if game != nil && *game != "" {
+		session.UpdateStatus(0, *game)
+
+	}
 
 	err = b.http_server.GiveRouter("discord", b.ReceiveRouter)
 	if err != nil {
