@@ -16,12 +16,20 @@ package discord
 
 import "github.com/ewollesen/discordgo"
 
+type Author interface {
+	BattleTag() (string, error) // do I belong here?
+	Mention() string
+	PermittedTo(perm int) (bool, error)
+	Nick() (string, error)
+}
+
 type Command interface {
 	Name() string
 	Args() string
 	Session() Session
 	Message() *discordgo.Message
 	Reply(msg string) error
+	Author() Author
 }
 
 type Session interface {

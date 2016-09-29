@@ -16,14 +16,13 @@ package discord
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/boltdb/bolt"
 	"github.com/ewollesen/discordgo"
 	"xmtp.net/xmtpbot/queue"
+	"xmtp.net/xmtpbot/util"
 )
 
 const (
@@ -31,7 +30,6 @@ const (
 )
 
 var (
-	btagRe        = regexp.MustCompile("^\\pL[\\pL\\pN]{2,11}#\\d{1,7}$")
 	symbolChecked = string([]byte{0xe2, 0x9c, 0x93})
 	symbolSaltire = string([]byte{0xe2, 0x98, 0x93})
 )
@@ -87,13 +85,16 @@ func (b *bot) enqueue(cmd Command) (err error) {
 		btag = args[0]
 	}
 
-	if len(btag) == 0 {
-		return cmd.Reply(fmt.Sprintf("No BattleTag specified. " +
-			"Try `!enqueue example#1234`."))
+	if btag == "" {
+		btag, err := cmd.Author().BattleTag()
+		if err != nil || btag == "" {
+			return cmd.Reply(fmt.Sprintf("No BattleTag specified. " +
+				"Try `!enqueue example#1234`."))
+		}
 	}
-
-	if !validBattleTag(btag) {
-		return cmd.Reply(fmt.Sprintf("BattleTag %q appears to be invalid.", btag))
+	if !util.ValidBattleTag(btag) {
+		return cmd.Reply(
+			fmt.Sprintf("BattleTag %q appears to be invalid.", btag))
 	}
 
 	u := &user{
@@ -110,12 +111,14 @@ func (b *bot) enqueue(cmd Command) (err error) {
 	pos := q.Position(cmd.Message().Author.ID)
 	if pos > -1 {
 		return cmd.Reply(fmt.Sprintf("User %s is already "+
-			"queued as %q in position %d.", mention(u), u.btag, pos))
+			"queued as %q in position %d.", cmd.Author().Mention(),
+			btag, pos))
 	}
 
 	if b.userEnqueueRateLimitTriggered(cmd.Message().Author.ID) {
 		msg := fmt.Sprintf("You may enqueue at most once every 5 "+
-			"minutes, %s. Please try again later.", mention(u))
+			"minutes, %s. Please try again later.",
+			cmd.Author().Mention())
 		return cmd.Reply(msg)
 	}
 
@@ -124,7 +127,8 @@ func (b *bot) enqueue(cmd Command) (err error) {
 		if queue.AlreadyQueuedError.Contains(err) {
 			return cmd.Reply(fmt.Sprintf("User %s is already "+
 				"queued as %q in position %d.",
-				mention(u), u.btag, q.Position(cmd.Message().Author.ID)))
+				cmd.Author().Mention(), btag,
+				q.Position(cmd.Message().Author.ID)))
 		}
 		return cmd.Reply(fmt.Sprintf("Error enqueueing: %s", err))
 	}
@@ -266,16 +270,12 @@ func (b *bot) queueTake(q queue.Queue, cmd Command) string {
 }
 
 func (b *bot) queueIdentifyRole(q queue.Queue, cmd Command) string {
-	guild_id, err := cmd.Session().GuildIdFromChannelId(
-		cmd.Message().ChannelID)
+	nick, err := cmd.Author().Nick()
 	if err != nil {
 		logger.Errore(err)
 		return "Error identifying roles."
 	}
-	nick := b.lookupNick(guild_id, cmd.Message().Author.ID, cmd.Session())
-	if nick == "" {
-		nick = cmd.Message().Author.Username
-	}
+
 	roles := extractRoles(nick)
 	dps := symbolSaltire
 	if roles.DPS {
@@ -291,6 +291,7 @@ func (b *bot) queueIdentifyRole(q queue.Queue, cmd Command) string {
 	}
 	msg := fmt.Sprintf("Roles matched by %q: DPS: %s, Support: %s, Tank: %s",
 		nick, dps, support, tank)
+
 	return msg
 }
 
@@ -303,26 +304,8 @@ func (b *bot) queueRoles(q queue.Queue, cmd Command) string {
 		strings.Join([]string{tanks, supports, dps}, "\n")
 }
 
-func mention(u *user) string {
-	return fmt.Sprintf("<@!%s>", u.ID)
-}
-
-func username(user *discordgo.User) string {
-	return user.Username
-}
-
 func userAuthorized(cmd Command) (ok bool, err error) {
-	return userPermittedTo(cmd, discordgo.PermissionKickMembers)
-}
-
-func userPermittedTo(cmd Command, perm int) (bool, error) {
-	perms, err := cmd.Session().UserChannelPermissions(
-		cmd.Message().Author.ID, cmd.Message().ChannelID)
-	if err != nil {
-		return false, err
-	}
-
-	return perms&perm > 0, nil
+	return cmd.Author().PermittedTo(discordgo.PermissionKickMembers)
 }
 
 type user struct {
@@ -343,10 +326,6 @@ func (b *bot) clearUserLastEnqueued() (err error) {
 	return nil
 }
 
-func validBattleTag(btag string) bool {
-	return btagRe.MatchString(btag)
-}
-
 func (b *bot) lookupQueue(channel_id string, session Session) (queue.Queue,
 	error) {
 
@@ -356,38 +335,4 @@ func (b *bot) lookupQueue(channel_id string, session Session) (queue.Queue,
 	}
 
 	return b.queues.Lookup(guild_id), nil
-}
-
-func (b *bot) lookupNick(guild_id, user_id string, session Session) (nick string) {
-	b.bolt_db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketNicks))
-		nick = string(b.Get([]byte(user_id)))
-		return nil
-	})
-
-	var err error
-	if nick == "" {
-		nick, err = b.fetchNick(guild_id, user_id, session)
-		if err != nil {
-			logger.Errore(err)
-			return ""
-		}
-	}
-
-	logger.Debugf("looked up %q and found %q", user_id, nick)
-	return nick
-}
-
-func (b *bot) fetchNick(guild_id, user_id string, session Session) (nick string,
-	err error) {
-
-	member, err := session.Member(guild_id, user_id)
-	if err != nil {
-		return "", err
-	}
-	if member.Nick != "" {
-		logger.Errore(b.cacheNick(user_id, member.Nick))
-	}
-
-	return member.Nick, nil
 }

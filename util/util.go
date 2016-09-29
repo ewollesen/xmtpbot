@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"math/rand"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/boltdb/bolt"
@@ -25,7 +26,11 @@ import (
 	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
 )
 
-var logger = spacelog.GetLoggerNamed("util")
+var (
+	btagRe = regexp.MustCompile("^\\pL[\\pL\\pN]{2,11}#\\d{1,7}$")
+
+	logger = spacelog.GetLoggerNamed("util")
+)
 
 func init() {
 	spacelog_setup.MustSetup("util")
@@ -56,4 +61,19 @@ func OpenBoltDB(db_path string) *bolt.DB {
 	}
 
 	return db
+}
+
+func ParseBattleTag(s string) string {
+	words := strings.Split(s, " ")
+	for _, word := range words {
+		if ValidBattleTag(word) {
+			return word
+		}
+	}
+
+	return ""
+}
+
+func ValidBattleTag(btag string) bool {
+	return btagRe.MatchString(btag)
 }

@@ -313,6 +313,14 @@ func (c *command) Session() Session {
 	return c.session
 }
 
+func (c *command) Author() Author {
+	return &author{
+		user:       c.message.Author,
+		session:    c.session,
+		channel_id: c.Message().ChannelID,
+	}
+}
+
 func (c *command) Reply(msg string) (err error) {
 	if len(msg) < *maxSendSize {
 		_, err = c.session.ChannelMessageSend(c.message.ChannelID, msg)

@@ -264,20 +264,6 @@ func TestEnqueueRateLimit(t *testing.T) {
 
 }
 
-func TestValidBattleTag(t *testing.T) {
-	test := test.New(t)
-	test.Assert(validBattleTag("example#1234"))
-	test.Assert(validBattleTag("éxample#1234"))
-
-	test.Assert(!validBattleTag("example#12345678"), "too many digits")
-	test.Assert(!validBattleTag("3example#1234"), "can't start with a digit")
-	test.Assert(!validBattleTag("exam ple#1234"), "no spaces")
-	test.Assert(!validBattleTag("example"), "no discriminator")
-	test.Assert(!validBattleTag("exam ple#"), "blank discriminator")
-	test.Assert(!validBattleTag("exam ple#ooo"), "non-digit discriminator")
-	test.Assert(!validBattleTag("tooooooooooooolong#1234"), "too long")
-}
-
 func TestIdentifyRoleDefaultsToDPS(t *testing.T) {
 	test := test.New(t)
 	bot := newBot()
@@ -321,44 +307,12 @@ func TestIdentifyRolePerformsServerLookup(t *testing.T) {
 			ChannelID: testChannelId,
 		},
 	}
-	bot.initBoltDb(util.OpenBoltDB("test-bolt.db")) // FIXME: ugly
-	defer func() {
-		os.Remove("test-bolt.db")
-	}()
 
 	session.appendMemberNicks("foobar [tank]")
 	test.AssertEqual(bot.queueIdentifyRole(nil, cmd),
 		fmt.Sprintf("Roles matched by \"foobar [tank]\": DPS: %s, "+
 			"Support: %s, Tank: %s",
 			symbolSaltire, symbolSaltire, symbolChecked))
-}
-
-func TestIdentifyRolePerformsCacheLookup(t *testing.T) {
-	test := test.New(t)
-	bot := newBot()
-	session := newMockSession()
-	cmd := &command{
-		name:    "role",
-		args:    "",
-		session: session,
-		message: &discordgo.Message{
-			Author: &discordgo.User{
-				ID:       testUserId,
-				Username: "foobar",
-			},
-			ChannelID: testChannelId,
-		},
-	}
-	bot.initBoltDb(util.OpenBoltDB("test-bolt.db")) // FIXME: ugly
-	defer func() {
-		os.Remove("test-bolt.db")
-	}()
-
-	bot.cacheNick(testUserId, "foobar [flex]")
-	test.AssertEqual(bot.queueIdentifyRole(nil, cmd),
-		fmt.Sprintf("Roles matched by \"foobar [flex]\": DPS: %s, "+
-			"Support: %s, Tank: %s",
-			symbolChecked, symbolChecked, symbolChecked))
 }
 
 func TestRoles(t *testing.T) {
