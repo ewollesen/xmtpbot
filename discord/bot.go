@@ -16,7 +16,6 @@ package discord
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -408,10 +407,6 @@ func (b *bot) myDiscordUserId(s *discordgo.Session) string {
 }
 
 func (b *bot) presenceHandler(s *discordgo.Session, p *discordgo.PresenceUpdate) {
-	if p.Nick != "" {
-		b.cacheNick(p.User.ID, p.Nick)
-		b.cacheRole(p.User.ID, p.Nick)
-	}
 	logger.Warne(b.markSeen(p.User.Username))
 }
 
@@ -874,39 +869,6 @@ func (s *session) GuildIdFromChannelId(channel_id string) (guild_id string,
 	}
 
 	return ch.GuildID, nil
-}
-
-func (b *bot) cacheNick(user_id, nick string) error {
-	if nick == "" {
-		return nil
-	}
-
-	if b.bolt_db == nil {
-		return nil
-	}
-
-	return b.bolt_db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketNicks))
-		return b.Put([]byte(user_id), []byte(nick))
-	})
-}
-
-func (b *bot) cacheRole(user_id, nick string) error {
-	if b.bolt_db == nil {
-		return nil
-	}
-
-	roles := extractRoles(nick)
-
-	return b.bolt_db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucketRoles))
-		roles_json_bytes, err := json.Marshal(roles)
-		if err != nil {
-			return err
-		}
-
-		return b.Put([]byte(user_id), []byte(roles_json_bytes))
-	})
 }
 
 type roles struct {
