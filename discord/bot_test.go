@@ -93,6 +93,16 @@ func TestTankRegExp(t *testing.T) {
 	test.AssertOnlyTank("flex [tank]")
 }
 
+func TestRoleRegExp(t *testing.T) {
+	test := newBotTest(t)
+
+	test.AssertRoles("foo (support)", &roles{Support: true})
+	test.AssertRoles("foo :(", &roles{DPS: true})
+	test.AssertRoles("foo :)", &roles{DPS: true})
+	test.AssertRoles("foo [tank", &roles{DPS: true})
+	test.AssertRoles("foo [mom]", &roles{DPS: true})
+}
+
 func TestSupportTankRegExp(t *testing.T) {
 	test := newBotTest(t)
 
@@ -113,6 +123,7 @@ func TestFlexRegExp(t *testing.T) {
 	test.AssertFlex("foo [flex]")
 	test.AssertFlex("foo [fill]")
 	test.AssertFlex("foo [any]")
+	test.AssertFlex("🌺 vissy (flex) 🌺")
 }
 
 func TestDPSSupportRegExp(t *testing.T) {

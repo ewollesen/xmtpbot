@@ -65,7 +65,7 @@ var (
 		"Protocol for discord oauth redirects")
 	game = flag.String("discord.game", "!help", "Game being played")
 
-	roleRe     = regexp.MustCompile("\\[([^\\]]+)\\]")
+	roleRe     = regexp.MustCompile(`[\[\(]([^\]\)]+)[\]\)]`)
 	roleTankRe = regexp.MustCompile("(?i:\\b(tank|d\\.?va|rein(hardt)?|(roadhog|road|hog)|wins(ton)?|zarya)\\b)")
 	roleDPSRe  = regexp.MustCompile("(?i:\\b(dps|dam(age)?)\\b)")
 	// Intentionally not including symmetra, cuz I'm a dick
