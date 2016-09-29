@@ -295,6 +295,7 @@ type command struct {
 	args    string
 	session Session
 	message *discordgo.Message
+	author  Author
 }
 
 func (c *command) Name() string {
@@ -314,11 +315,13 @@ func (c *command) Session() Session {
 }
 
 func (c *command) Author() Author {
-	return &author{
-		user:       c.message.Author,
-		session:    c.session,
-		channel_id: c.Message().ChannelID,
+	if c.author != nil {
+		return c.author
 	}
+
+	c.author = newAuthor(c.message.Author, c.session, c.Message().ChannelID)
+
+	return c.author
 }
 
 func (c *command) Reply(template string, args ...interface{}) (err error) {

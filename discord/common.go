@@ -18,18 +18,20 @@ import "github.com/ewollesen/discordgo"
 
 type Author interface {
 	BattleTag() (string, error) // do I belong here?
+	Key() string
 	Mention() string
+	Nick() string
 	PermittedTo(perm int) (bool, error)
-	Nick() (string, error)
+	SetBattleTag(btag string) error // do I belong here?
 }
 
 type Command interface {
-	Name() string
 	Args() string
-	Session() Session
-	Message() *discordgo.Message
-	Reply(template string, args ...interface{}) error
 	Author() Author
+	Message() *discordgo.Message
+	Name() string
+	Reply(template string, args ...interface{}) error
+	Session() Session
 }
 
 type Session interface {

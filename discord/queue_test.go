@@ -94,12 +94,14 @@ func TestEnqueue(t *testing.T) {
 			"in position 1.")
 
 	cmd.args = ""
+	cmd.author = nil
 	test.AssertNil(bot.enqueue(cmd))
 	test.AssertEqual(len(session.replies), 2)
 	assertContains(test, session.replies,
 		"No BattleTag specified. Try `!enqueue example#1234`.")
 
 	cmd.args = testBTag
+	cmd.author = nil
 	test.AssertNil(bot.enqueue(cmd))
 	test.AssertEqual(len(session.replies), 3)
 	assertContains(test, session.replies,
@@ -234,7 +236,10 @@ func TestEnqueueRateLimit(t *testing.T) {
 
 	test.AssertNil(bot.enqueue(cmd))
 	bot.dequeue(dequeue_cmd)
+
+	cmd.author = nil
 	test.AssertNil(bot.enqueue(cmd))
+
 	assertContains(test, session.replies,
 		"Successfully added "+testBTag+" to the scrimmages"+
 			" queue in position 1.")
@@ -250,6 +255,7 @@ func TestEnqueueRateLimit(t *testing.T) {
 	bot.userEnqueued(testUserId,
 		time.Now().Add(-1*(time.Minute*5+time.Second)))
 	test.AssertNil(bot.enqueue(cmd))
+	cmd.author = nil
 	assertContains(test, session.replies,
 		"Successfully added "+testBTag+" to the scrimmages "+
 			"queue in position 1.")
@@ -258,6 +264,7 @@ func TestEnqueueRateLimit(t *testing.T) {
 	bot.queueClear(q, cmd)
 	session.replies = make([]string, 0)
 	test.AssertNil(bot.enqueue(cmd))
+	cmd.author = nil
 	assertContains(test, session.replies,
 		"Successfully added "+testBTag+" to the scrimmages "+
 			"queue in position 1.")

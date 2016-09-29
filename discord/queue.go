@@ -41,29 +41,33 @@ func (b *bot) dequeue(cmd Command) (err error) {
 		return cmd.Reply("Error looking up guild: %s", err)
 	}
 
-	queueable, err := q.Remove(cmd.Message().Author.ID)
+	queueable, err := q.Remove(cmd.Author().Key())
 	if err != nil && !queue.NotFoundError.Contains(err) {
-		msg := fmt.Sprintf("Error removing %s from the queue: %s",
-			cmd.Message().Author.Username, err)
-		return cmd.Reply(msg)
+		return cmd.Reply("Error removing %s from the queue: %s",
+			cmd.Author().Nick(), err)
 	}
 
 	if queueable == nil {
-		msg := fmt.Sprintf("Error: nil member removed")
-		return cmd.Reply(msg)
+		logger.Error("Removed nil member from the queue")
+		return cmd.Reply("Error removing %s from the queue.",
+			cmd.Author().Nick())
 	}
 
-	u := queueable.(*user)
+	a := queueable.(Author)
+	btag, err := a.BattleTag()
+	if err != nil {
+		btag = a.Nick()
+	}
 
 	return cmd.Reply("Successfully removed %s from the scrimmages "+
-		"queue.", u.btag)
+		"queue.", btag)
 }
 
-func (b *bot) userEnqueueRateLimitTriggered(user_id string) bool {
+func (b *bot) userEnqueueRateLimitTriggered(key string) bool {
 	b.user_enqueue_rate_limit_mtx.Lock()
 	defer b.user_enqueue_rate_limit_mtx.Unlock()
 
-	at, ok := b.user_last_enqueued[user_id]
+	at, ok := b.user_last_enqueued[key]
 	if !ok {
 		return false
 	}
@@ -71,11 +75,11 @@ func (b *bot) userEnqueueRateLimitTriggered(user_id string) bool {
 	return at.Add(time.Minute * 5).After(time.Now())
 }
 
-func (b *bot) userEnqueued(user_id string, at time.Time) {
+func (b *bot) userEnqueued(key string, at time.Time) {
 	b.user_enqueue_rate_limit_mtx.Lock()
 	defer b.user_enqueue_rate_limit_mtx.Unlock()
 
-	b.user_last_enqueued[user_id] = at
+	b.user_last_enqueued[key] = at
 }
 
 func (b *bot) enqueue(cmd Command) (err error) {
@@ -97,10 +101,7 @@ func (b *bot) enqueue(cmd Command) (err error) {
 			fmt.Sprintf("BattleTag %q appears to be invalid.", btag))
 	}
 
-	u := &user{
-		User: cmd.Message().Author,
-		btag: btag,
-	}
+	cmd.Author().SetBattleTag(btag)
 
 	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
 	if err != nil {
@@ -108,33 +109,33 @@ func (b *bot) enqueue(cmd Command) (err error) {
 		return cmd.Reply("Error looking up guild: %s", err)
 	}
 
-	pos := q.Position(cmd.Message().Author.ID)
+	pos := q.Position(cmd.Author().Key())
 	if pos > -1 {
 		return cmd.Reply("User %s is already queued as %q "+
 			"in position %d.", cmd.Author().Mention(), btag, pos)
 	}
 
-	if b.userEnqueueRateLimitTriggered(cmd.Message().Author.ID) {
+	if b.userEnqueueRateLimitTriggered(cmd.Author().Key()) {
 		return cmd.Reply("You may enqueue at most once every 5 "+
 			"minutes, %s. Please try again later.",
 			cmd.Author().Mention())
 	}
 
-	err = q.Enqueue(u)
+	err = q.Enqueue(cmd.Author())
 	if err != nil {
 		if queue.AlreadyQueuedError.Contains(err) {
 			return cmd.Reply("User %s is already "+
 				"queued as %q in position %d.",
 				cmd.Author().Mention(), btag,
-				q.Position(cmd.Message().Author.ID))
+				q.Position(cmd.Author().Key()))
 		}
 		return cmd.Reply("Error enqueueing: %s", err)
 	}
 
-	b.userEnqueued(cmd.Message().Author.ID, time.Now())
+	b.userEnqueued(cmd.Author().Key(), time.Now())
 
 	return cmd.Reply("Successfully added %s to the scrimmages "+
-		"queue in position %d.", u.btag, q.Size())
+		"queue in position %d.", btag, q.Size())
 }
 
 func (b *bot) queue(cmd Command) (err error) {
@@ -190,7 +191,7 @@ func (b *bot) queueClear(q queue.Queue, cmd Command) string {
 	if err != nil {
 		logger.Errore(err)
 		return fmt.Sprintf("Error authorizing %s: %s",
-			cmd.Message().Author.Username, err)
+			cmd.Author().Nick(), err)
 	}
 	if !ok {
 		return "Permission denied."
@@ -268,12 +269,7 @@ func (b *bot) queueTake(q queue.Queue, cmd Command) string {
 }
 
 func (b *bot) queueIdentifyRole(q queue.Queue, cmd Command) string {
-	nick, err := cmd.Author().Nick()
-	if err != nil {
-		logger.Errore(err)
-		return "Error identifying roles."
-	}
-
+	nick := cmd.Author().Nick()
 	roles := extractRoles(nick)
 	dps := symbolSaltire
 	if roles.DPS {

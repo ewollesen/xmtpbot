@@ -23,27 +23,33 @@ import (
 )
 
 type author struct {
-	user       *discordgo.User
-	session    Session
+	btag       string
 	channel_id string
 	guild_id   string
-	btag       string
+	member_    *discordgo.Member
+	session    Session
+	user       *discordgo.User
 }
 
 var _ Author = (*author)(nil)
 var _ queue.Queueable = (*author)(nil)
+
+func newAuthor(discord_author *discordgo.User, session Session,
+	channel_id string) *author {
+
+	return &author{
+		user:       discord_author,
+		session:    session,
+		channel_id: channel_id,
+	}
+}
 
 func (a *author) BattleTag() (string, error) {
 	if a.btag != "" {
 		return a.btag, nil
 	}
 
-	nick, err := a.Nick()
-	if err != nil {
-		return "", nil
-	}
-
-	a.btag = util.ParseBattleTag(nick)
+	a.btag = util.ParseBattleTag(a.Nick())
 
 	return a.btag, nil
 }
@@ -61,22 +67,14 @@ func (a *author) Mention() string {
 	return fmt.Sprintf("<@!%s>", a.user.ID)
 }
 
-func (a *author) Nick() (string, error) {
-	guild_id, err := a.guildId()
-	if err != nil {
-		return "", err
+func (a *author) Nick() string {
+	member, err := a.member()
+	if err != nil || member.Nick == "" {
+		logger.Warne(err)
+		return a.user.Username
 	}
 
-	member, err := a.session.Member(guild_id, a.user.ID)
-	if err != nil {
-		return "", err
-	}
-
-	if member.Nick != "" {
-		return member.Nick, nil
-	}
-
-	return a.user.Username, nil
+	return member.Nick
 }
 
 func (a *author) PermittedTo(perm int) (bool, error) {
@@ -87,6 +85,12 @@ func (a *author) PermittedTo(perm int) (bool, error) {
 
 	return perms&perm > 0, nil
 
+}
+
+func (a *author) SetBattleTag(btag string) error {
+	a.btag = btag
+
+	return nil
 }
 
 func (a *author) guildId() (string, error) {
@@ -101,4 +105,24 @@ func (a *author) guildId() (string, error) {
 	a.guild_id = guild_id
 
 	return guild_id, nil
+}
+
+func (a *author) member() (*discordgo.Member, error) {
+	if a.member_ != nil {
+		return a.member_, nil
+	}
+
+	guild_id, err := a.guildId()
+	if err != nil {
+		return nil, err
+	}
+
+	member, err := a.session.Member(guild_id, a.user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	a.member_ = member
+
+	return member, nil
 }
