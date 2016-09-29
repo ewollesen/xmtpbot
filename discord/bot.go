@@ -321,7 +321,9 @@ func (c *command) Author() Author {
 	}
 }
 
-func (c *command) Reply(msg string) (err error) {
+func (c *command) Reply(template string, args ...interface{}) (err error) {
+	msg := fmt.Sprintf(template, args...)
+
 	if len(msg) < *maxSendSize {
 		_, err = c.session.ChannelMessageSend(c.message.ChannelID, msg)
 		return err
@@ -460,15 +462,13 @@ func (b *bot) idle(cmd Command) error {
 
 	since, err := b.seen.Idle(cmd.Args())
 	if err != nil {
-		return cmd.Reply(fmt.Sprintf("Error retrieving idle for %q",
-			cmd.Args()))
+		return cmd.Reply("Error retrieving idle for %q", cmd.Args())
 	}
 	if since == nil {
-		return cmd.Reply(fmt.Sprintf("No idle record for %q found",
-			cmd.Args()))
+		return cmd.Reply("No idle record for %q found", cmd.Args())
 	}
 
-	return cmd.Reply(fmt.Sprintf("%s idle for %s", cmd.Args(), since))
+	return cmd.Reply("%s idle for %s", cmd.Args(), since)
 }
 
 func (b *bot) lastSeen(cmd Command) error {
@@ -478,15 +478,13 @@ func (b *bot) lastSeen(cmd Command) error {
 
 	at, err := b.seen.LastSeen(cmd.Args())
 	if err != nil {
-		return cmd.Reply(fmt.Sprintf("Error retrieving last seen for %q",
-			cmd.Args()))
+		return cmd.Reply("Error retrieving last seen for %q", cmd.Args())
 	}
 	if at == nil {
-		return cmd.Reply(fmt.Sprintf("No seen record for %q found",
-			cmd.Args()))
+		return cmd.Reply("No seen record for %q found", cmd.Args())
 	}
 
-	return cmd.Reply(fmt.Sprintf("%s was last seen %s", cmd.Args(), at))
+	return cmd.Reply("%s was last seen %s", cmd.Args(), at)
 }
 
 func (b *bot) setReminder(cmd Command) error {

@@ -38,7 +38,7 @@ func (b *bot) dequeue(cmd Command) (err error) {
 	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
 	if err != nil {
 		logger.Errore(err)
-		return cmd.Reply(fmt.Sprintf("Error looking up guild: %s", err))
+		return cmd.Reply("Error looking up guild: %s", err)
 	}
 
 	queueable, err := q.Remove(cmd.Message().Author.ID)
@@ -55,8 +55,8 @@ func (b *bot) dequeue(cmd Command) (err error) {
 
 	u := queueable.(*user)
 
-	return cmd.Reply(fmt.Sprintf("Successfully removed %s from the "+
-		"scrimmages queue.", u.btag))
+	return cmd.Reply("Successfully removed %s from the scrimmages "+
+		"queue.", u.btag)
 }
 
 func (b *bot) userEnqueueRateLimitTriggered(user_id string) bool {
@@ -88,8 +88,8 @@ func (b *bot) enqueue(cmd Command) (err error) {
 	if btag == "" {
 		btag, err := cmd.Author().BattleTag()
 		if err != nil || btag == "" {
-			return cmd.Reply(fmt.Sprintf("No BattleTag specified. " +
-				"Try `!enqueue example#1234`."))
+			return cmd.Reply("No BattleTag specified. " +
+				"Try `!enqueue example#1234`.")
 		}
 	}
 	if !util.ValidBattleTag(btag) {
@@ -105,38 +105,36 @@ func (b *bot) enqueue(cmd Command) (err error) {
 	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
 	if err != nil {
 		logger.Errore(err)
-		return cmd.Reply(fmt.Sprintf("Error looking up guild: %s", err))
+		return cmd.Reply("Error looking up guild: %s", err)
 	}
 
 	pos := q.Position(cmd.Message().Author.ID)
 	if pos > -1 {
-		return cmd.Reply(fmt.Sprintf("User %s is already "+
-			"queued as %q in position %d.", cmd.Author().Mention(),
-			btag, pos))
+		return cmd.Reply("User %s is already queued as %q "+
+			"in position %d.", cmd.Author().Mention(), btag, pos)
 	}
 
 	if b.userEnqueueRateLimitTriggered(cmd.Message().Author.ID) {
-		msg := fmt.Sprintf("You may enqueue at most once every 5 "+
+		return cmd.Reply("You may enqueue at most once every 5 "+
 			"minutes, %s. Please try again later.",
 			cmd.Author().Mention())
-		return cmd.Reply(msg)
 	}
 
 	err = q.Enqueue(u)
 	if err != nil {
 		if queue.AlreadyQueuedError.Contains(err) {
-			return cmd.Reply(fmt.Sprintf("User %s is already "+
+			return cmd.Reply("User %s is already "+
 				"queued as %q in position %d.",
 				cmd.Author().Mention(), btag,
-				q.Position(cmd.Message().Author.ID)))
+				q.Position(cmd.Message().Author.ID))
 		}
-		return cmd.Reply(fmt.Sprintf("Error enqueueing: %s", err))
+		return cmd.Reply("Error enqueueing: %s", err)
 	}
 
 	b.userEnqueued(cmd.Message().Author.ID, time.Now())
 
-	return cmd.Reply(fmt.Sprintf("Successfully added %s to the scrimmages "+
-		"queue in position %d.", u.btag, q.Size()))
+	return cmd.Reply("Successfully added %s to the scrimmages "+
+		"queue in position %d.", u.btag, q.Size())
 }
 
 func (b *bot) queue(cmd Command) (err error) {
@@ -156,7 +154,7 @@ func (b *bot) queue(cmd Command) (err error) {
 	q, err := b.lookupQueue(cmd.Message().ChannelID, cmd.Session())
 	if err != nil {
 		logger.Errore(err)
-		return cmd.Reply(fmt.Sprintf("Error looking up guild: %s", err))
+		return cmd.Reply("Error looking up guild: %s", err)
 	}
 
 	switch cmd_name {

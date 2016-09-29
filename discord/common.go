@@ -28,7 +28,7 @@ type Command interface {
 	Args() string
 	Session() Session
 	Message() *discordgo.Message
-	Reply(msg string) error
+	Reply(template string, args ...interface{}) error
 	Author() Author
 }
 

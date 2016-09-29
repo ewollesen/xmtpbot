@@ -27,7 +27,6 @@ import (
 	"github.com/nlopes/slack"
 	"github.com/spacemonkeygo/errors"
 	"github.com/spacemonkeygo/spacelog"
-
 	"xmtp.net/xmtpbot/dice"
 	"xmtp.net/xmtpbot/fortune"
 	"xmtp.net/xmtpbot/html"
@@ -225,12 +224,12 @@ type Command struct {
 	rtm     *slack.RTM
 }
 
-func (c *Command) Reply(msg string) (err error) {
+func (c *Command) Reply(template string, args ...interface{}) (err error) {
 	response := slack.OutgoingMessage{
 		ID:      1,
 		Type:    "message",
 		Channel: c.message.Channel,
-		Text:    msg,
+		Text:    fmt.Sprintf(template, args...),
 	}
 	c.rtm.SendMessage(&response)
 
@@ -296,15 +295,13 @@ func (b *bot) idle(cmd Command) error {
 
 	since, err := b.seen.Idle(cmd.args)
 	if err != nil {
-		return cmd.Reply(fmt.Sprintf("Error retrieving idle for %q",
-			cmd.args))
+		return cmd.Reply("Error retrieving idle for %q", cmd.args)
 	}
 	if since == nil {
-		return cmd.Reply(fmt.Sprintf("No idle record for %q found",
-			cmd.args))
+		return cmd.Reply("No idle record for %q found", cmd.args)
 	}
 
-	return cmd.Reply(fmt.Sprintf("%s idle for %s", cmd.args, since))
+	return cmd.Reply("%s idle for %s", cmd.args, since)
 }
 
 // FIXME cut and paste from discord
@@ -315,15 +312,13 @@ func (b *bot) lastSeen(cmd Command) error {
 
 	at, err := b.seen.LastSeen(cmd.args)
 	if err != nil {
-		return cmd.Reply(fmt.Sprintf("Error retrieving last seen for %q",
-			cmd.args))
+		return cmd.Reply("Error retrieving last seen for %q", cmd.args)
 	}
 	if at == nil {
-		return cmd.Reply(fmt.Sprintf("No seen record for %q found",
-			cmd.args))
+		return cmd.Reply("No seen record for %q found", cmd.args)
 	}
 
-	return cmd.Reply(fmt.Sprintf("%s was last seen %s", cmd.args, at))
+	return cmd.Reply("%s was last seen %s", cmd.args, at)
 }
 
 // FIXME cut and paste from discord
