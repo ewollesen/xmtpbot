@@ -61,8 +61,7 @@ func main() {
 		remind.New(),
 		twitch.Setup(*configDir),
 		http_server,
-		http_status,
-		nil)
+		http_status)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 
 	slack_bot := slack.New(

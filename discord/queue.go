@@ -90,15 +90,14 @@ func (b *bot) enqueue(cmd Command) (err error) {
 	}
 
 	if btag == "" {
-		btag, err := cmd.Author().BattleTag()
+		btag, err = cmd.Author().BattleTag()
 		if err != nil || btag == "" {
 			return cmd.Reply("No BattleTag specified. " +
 				"Try `!enqueue example#1234`.")
 		}
 	}
 	if !util.ValidBattleTag(btag) {
-		return cmd.Reply(
-			fmt.Sprintf("BattleTag %q appears to be invalid.", btag))
+		return cmd.Reply("BattleTag %q appears to be invalid.", btag)
 	}
 
 	cmd.Author().SetBattleTag(btag)

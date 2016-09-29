@@ -73,6 +73,18 @@ func TestEnqueue(t *testing.T) {
 		"User <@!123456> is already queued as \"example#1234\" in position 1.")
 }
 
+func TestEnqueueParsesBattleTagFromNick(t *testing.T) {
+	test, bot, session := newQueueTest(t)
+	msg := newTestMessage(testUserId, testChannelId)
+	var cmd *command
+
+	cmd = newTestCommand("enqueue", "", session, msg)
+	session.appendMemberNicks("foo#1234 [tank]")
+	test.AssertNil(bot.enqueue(cmd))
+	test.AssertContainsString(session.replies,
+		"Successfully added foo#1234 to the scrimmages queue in position 1.")
+}
+
 func TestQueueClear(t *testing.T) {
 	test, bot, session := newQueueTest(t)
 	msg := newTestMessage(testUserId, testChannelId)
