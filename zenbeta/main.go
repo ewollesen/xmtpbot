@@ -30,15 +30,12 @@ import (
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
 	urls_setup "xmtp.net/xmtpbot/urls/setup"
-	"xmtp.net/xmtpbot/util"
 )
 
 var (
 	configDir = flag.String("config_dir", os.ExpandEnv("$HOME/.zenbeta"),
 		"directory in which to store config and state")
 	defaultFlagfile = path.Join(*configDir, "config")
-	boltDBPath      = flag.String("db_path", "data.db",
-		"Path to write database data into (relative to config_dir)")
 
 	logger = spacelog.GetLoggerNamed("zenbeta")
 )
@@ -52,7 +49,6 @@ func main() {
 	shutdown := make(chan bool)
 	http_server := http_server.New()
 	http_status := http_status.New(http_server)
-	bolt_db := util.OpenBoltDB(path.Join(*configDir, *boltDBPath))
 	var wg sync.WaitGroup
 
 	discord_bot := discord.New(
@@ -62,8 +58,7 @@ func main() {
 		remind.New(),
 		nil,
 		http_server,
-		http_status,
-		bolt_db)
+		http_status)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 	logger.Errore(http_status.Run(shutdown, &wg))
 

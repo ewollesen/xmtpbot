@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boltdb/bolt"
 	"github.com/ewollesen/discordgo"
 	"github.com/gorilla/mux"
 	"github.com/spacemonkeygo/errors"
@@ -96,13 +95,11 @@ type bot struct {
 	queues                      queue.Manager
 	user_enqueue_rate_limit_mtx sync.Mutex
 	user_last_enqueued          map[string]time.Time
-	bolt_db                     *bolt.DB
 }
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	remind remind.Remind, twitch twitch.Twitch,
-	http_server http_server.Server, http_status http_status.Status,
-	bolt_db *bolt.DB) *bot {
+	http_server http_server.Server, http_status http_status.Status) *bot {
 
 	b := &bot{
 		seen:               seen_store,
@@ -116,7 +113,6 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		last_activity:      time.Now(),
 		queues:             queue.NewManager(),
 		user_last_enqueued: make(map[string]time.Time),
-		bolt_db:            bolt_db,
 	}
 
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
@@ -170,10 +166,6 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		handler: b.queue,
 	})
 	http_status.Register("discord", b.Status)
-
-	if b.bolt_db != nil {
-		b.initBoltDb(b.bolt_db)
-	}
 
 	return b
 }
@@ -910,24 +902,4 @@ func extractRoles(nick string) *roles {
 	}
 
 	return roles
-}
-
-func (b *bot) initBoltDb(db *bolt.DB) {
-	b.bolt_db = db
-	db.Update(func(tx *bolt.Tx) (err error) {
-		_, err = tx.CreateBucketIfNotExists([]byte(bucketNicks))
-		if err != nil {
-			return err
-		}
-		_, err = tx.CreateBucketIfNotExists([]byte(bucketRoles))
-		if err != nil {
-			return err
-		}
-		_, err = tx.CreateBucketIfNotExists([]byte(bucketBattleTags))
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
 }

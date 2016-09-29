@@ -16,7 +16,6 @@ package discord
 
 import (
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -25,7 +24,6 @@ import (
 	seen_mem "xmtp.net/xmtpbot/seen/memory"
 	"xmtp.net/xmtpbot/test"
 	url_mem "xmtp.net/xmtpbot/urls/memory"
-	"xmtp.net/xmtpbot/util"
 )
 
 const (
@@ -180,11 +178,6 @@ func TestIdentifyRoleDefaultsToDPS(t *testing.T) {
 	test, bot, session := newQueueTest(t)
 	msg := newTestMessage(testUserId, testChannelId)
 
-	bot.initBoltDb(util.OpenBoltDB("test-bolt.db")) // FIXME: ugly
-	defer func() {
-		os.Remove("test-bolt.db")
-	}()
-
 	cmd := newTestCommand("role", "", session, msg)
 	test.AssertEqual(bot.queueIdentifyRole(nil, cmd),
 		fmt.Sprintf("Roles matched by \"foobar\": DPS: %s, "+
@@ -232,7 +225,6 @@ func newBot() *bot {
 		last_activity:      time.Now(),
 		queues:             queue.NewManager(),
 		user_last_enqueued: make(map[string]time.Time),
-		bolt_db:            nil,
 	}
 }
 
