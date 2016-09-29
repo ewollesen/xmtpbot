@@ -217,7 +217,11 @@ func (b *bot) queueList(q queue.Queue, cmd Command) string {
 	if len(users) > 0 {
 		names := []string{}
 		for _, u := range users {
-			names = append(names, u.(*user).btag)
+			btag, err := u.(Author).BattleTag()
+			if err != nil {
+				btag = u.(Author).Nick()
+			}
+			names = append(names, btag)
 		}
 		return fmt.Sprintf("The scrimmages queue contains %d BattleTags: %s.",
 			len(names), strings.Join(names, ", "))
@@ -254,8 +258,12 @@ func (b *bot) queueTake(q queue.Queue, cmd Command) string {
 
 	btags := []string{}
 	for _, queueable := range taken {
-		u := queueable.(*user)
-		btags = append(btags, u.btag)
+		a := queueable.(Author)
+		btag, err := a.BattleTag()
+		if err != nil {
+			btag = a.Nick()
+		}
+		btags = append(btags, btag)
 	}
 	msg := fmt.Sprintf("Took %d BattleTags from the scrimmages queue", len(taken))
 	if len(taken) > 0 {

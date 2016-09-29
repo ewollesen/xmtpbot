@@ -57,3 +57,16 @@ func (t *Test) AssertErrorContains(err error, error_class *errors.ErrorClass) {
 		t.Fail()
 	}
 }
+
+func (t *Test) AssertContainsString(haystack []string, needle string,
+	msg ...string) {
+
+	for _, item := range haystack {
+		if item == needle {
+			return
+		}
+	}
+
+	t.Logf("expected %+v to contain %q", haystack, needle)
+	t.Fail()
+}
