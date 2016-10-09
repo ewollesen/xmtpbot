@@ -26,9 +26,9 @@ func TestNick(t *testing.T) {
 	session := newMockSession()
 	session.appendMemberNicks("foobar [dps]")
 	a := &author{
-		channel_id: "654321",
-		session:    session,
-		user: &discordgo.User{
+		ChannelId: "654321",
+		session:   session,
+		User: &discordgo.User{
 			ID:       "123456",
 			Username: "foobar",
 		},
@@ -41,9 +41,9 @@ func TestNickFallsBackToUsername(t *testing.T) {
 	test := test.New(t)
 	session := newMockSession()
 	a := &author{
-		channel_id: "654321",
-		session:    session,
-		user: &discordgo.User{
+		ChannelId: "654321",
+		session:   session,
+		User: &discordgo.User{
 			ID:       "123456",
 			Username: "foobar",
 		},

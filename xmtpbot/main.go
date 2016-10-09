@@ -38,6 +38,8 @@ import (
 var (
 	configDir = flag.String("config_dir", os.ExpandEnv("$HOME/.xmtpbot"),
 		"directory in which to store config and state")
+	redisAddr = flag.String("discord.redis_addr", "localhost:6379",
+		"address of redis server")
 	defaultFlagfile = path.Join(*configDir, "config")
 
 	logger = spacelog.GetLoggerNamed("xmtpbot")
@@ -61,7 +63,8 @@ func main() {
 		remind.New(),
 		twitch.Setup(*configDir),
 		http_server,
-		http_status)
+		http_status,
+		nil)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 
 	slack_bot := slack.New(

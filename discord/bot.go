@@ -99,7 +99,8 @@ type bot struct {
 
 func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	remind remind.Remind, twitch twitch.Twitch,
-	http_server http_server.Server, http_status http_status.Status) *bot {
+	http_server http_server.Server, http_status http_status.Status,
+	queues queue.Manager) *bot {
 
 	b := &bot{
 		seen:               seen_store,
@@ -111,7 +112,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		commands:           make(map[string]CommandHandler),
 		oauth_states:       make(map[string]string),
 		last_activity:      time.Now(),
-		queues:             queue.NewManager(),
+		queues:             queues,
 		user_last_enqueued: make(map[string]time.Time),
 	}
 
@@ -152,19 +153,22 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 	}
 	// b.RegisterCommand("url", simpleCommand(b.lookupURL,
 	// 	"search for a previously posted URL"))
-	b.RegisterCommand("dequeue", &commandHandler{
-		help:    "Type: `!dequeue` to leave the scrimmages queue",
-		handler: b.dequeue,
-	})
-	b.RegisterCommand("enqueue", &commandHandler{
-		help:    "Type: `!enqueue MyBattleTag#1234` to enter the scrimmages queue",
-		handler: b.enqueue,
-	})
-	b.RegisterCommand("queue", &commandHandler{
-		help: "queue for scrimmages. Run \"!queue help\" for " +
-			"more info",
-		handler: b.queue,
-	})
+	if queues != nil {
+		b.RegisterCommand("dequeue", &commandHandler{
+			help:    "Type: `!dequeue` to leave the scrimmages queue",
+			handler: b.dequeue,
+		})
+		b.RegisterCommand("enqueue", &commandHandler{
+			help: "Type: `!enqueue MyBattleTag#1234` to enter " +
+				"the scrimmages queue",
+			handler: b.enqueue,
+		})
+		b.RegisterCommand("queue", &commandHandler{
+			help: "queue for scrimmages. Run \"!queue help\" for " +
+				"more info",
+			handler: b.queue,
+		})
+	}
 	http_status.Register("discord", b.Status)
 
 	return b

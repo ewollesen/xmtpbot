@@ -340,10 +340,10 @@ func newQueueTest(t *testing.T) (*queueTest, *bot, *mockSession) {
 
 func newTestAuthor(user_id, btag string) Author {
 	return &author{
-		user: &discordgo.User{
+		User: &discordgo.User{
 			ID: user_id,
 		},
-		btag:     btag,
-		guild_id: testGuildId,
+		BattleTag_: btag,
+		GuildId:    testGuildId,
 	}
 }

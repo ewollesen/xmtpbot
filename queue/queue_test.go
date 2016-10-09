@@ -139,17 +139,17 @@ func assertContains(t *test.Test, q *queue, id string) {
 }
 
 type testQueueable struct {
-	key   string
-	value string
+	Id    string `json:"id"`
+	Value string `json:"value"`
 }
 
 func (q *testQueueable) Key() string {
-	return q.key
+	return q.Id
 }
 
-func newQueueable(key, value string) *testQueueable {
+func newQueueable(id, value string) *testQueueable {
 	return &testQueueable{
-		key:   key,
-		value: value,
+		Id:    id,
+		Value: value,
 	}
 }

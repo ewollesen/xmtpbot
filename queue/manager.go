@@ -14,11 +14,40 @@
 
 package queue
 
-import "sync"
+import (
+	"sync"
+
+	redis "gopkg.in/redis.v4"
+)
 
 type manager struct {
 	queues map[string]Queue
 	mtx    sync.Mutex
+}
+
+type redisManager struct {
+	name      string
+	client    *redis.Client
+	queues    map[string]Queue
+	marshaler marshalerFn
+}
+
+func NewRedisManager(name string, client *redis.Client, marshaler marshalerFn) Manager {
+	return &redisManager{
+		name:      name,
+		client:    client,
+		queues:    make(map[string]Queue),
+		marshaler: marshaler,
+	}
+}
+
+func (m *redisManager) Lookup(key string) Queue {
+	q, ok := m.queues[key]
+	if !ok {
+		q = NewRedis(m.name, m.client, m.marshaler)
+		m.queues[key] = q
+	}
+	return q
 }
 
 func NewManager() Manager {

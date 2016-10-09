@@ -15,6 +15,7 @@
 package discord
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/ewollesen/discordgo"
@@ -23,12 +24,12 @@ import (
 )
 
 type author struct {
-	btag       string
-	channel_id string
-	guild_id   string
-	member_    *discordgo.Member
+	BattleTag_ string            `json:"battle_tag"`
+	ChannelId  string            `json:"channel_id"`
+	GuildId    string            `json:"guild_id"`
+	Member_    *discordgo.Member `json:"member"`
 	session    Session
-	user       *discordgo.User
+	User       *discordgo.User `json:"user"`
 }
 
 var _ Author = (*author)(nil)
@@ -38,20 +39,20 @@ func newAuthor(discord_author *discordgo.User, session Session,
 	channel_id string) *author {
 
 	return &author{
-		user:       discord_author,
-		session:    session,
-		channel_id: channel_id,
+		User:      discord_author,
+		session:   session,
+		ChannelId: channel_id,
 	}
 }
 
 func (a *author) BattleTag() (string, error) {
-	if a.btag != "" {
-		return a.btag, nil
+	if a.BattleTag_ != "" {
+		return a.BattleTag_, nil
 	}
 
-	a.btag = util.ParseBattleTag(a.Nick())
+	a.BattleTag_ = util.ParseBattleTag(a.Nick())
 
-	return a.btag, nil
+	return a.BattleTag_, nil
 }
 
 func (a *author) Key() string {
@@ -60,25 +61,25 @@ func (a *author) Key() string {
 		guild_id = "unknown"
 	}
 
-	return fmt.Sprintf("%s-%s", guild_id, a.user.ID)
+	return fmt.Sprintf("%s-%s", guild_id, a.User.ID)
 }
 
 func (a *author) Mention() string {
-	return fmt.Sprintf("<@!%s>", a.user.ID)
+	return fmt.Sprintf("<@!%s>", a.User.ID)
 }
 
 func (a *author) Nick() string {
 	member, err := a.member()
 	if err != nil || member.Nick == "" {
 		logger.Warne(err)
-		return a.user.Username
+		return a.User.Username
 	}
 
 	return member.Nick
 }
 
 func (a *author) PermittedTo(perm int) (bool, error) {
-	perms, err := a.session.UserChannelPermissions(a.user.ID, a.channel_id)
+	perms, err := a.session.UserChannelPermissions(a.User.ID, a.ChannelId)
 	if err != nil {
 		return false, err
 	}
@@ -88,28 +89,28 @@ func (a *author) PermittedTo(perm int) (bool, error) {
 }
 
 func (a *author) SetBattleTag(btag string) error {
-	a.btag = btag
+	a.BattleTag_ = btag
 
 	return nil
 }
 
 func (a *author) guildId() (string, error) {
-	if a.guild_id != "" {
-		return a.guild_id, nil
+	if a.GuildId != "" {
+		return a.GuildId, nil
 	}
 
-	guild_id, err := a.session.GuildIdFromChannelId(a.channel_id)
+	guild_id, err := a.session.GuildIdFromChannelId(a.ChannelId)
 	if err != nil {
 		return "", nil
 	}
-	a.guild_id = guild_id
+	a.GuildId = guild_id
 
 	return guild_id, nil
 }
 
 func (a *author) member() (*discordgo.Member, error) {
-	if a.member_ != nil {
-		return a.member_, nil
+	if a.Member_ != nil {
+		return a.Member_, nil
 	}
 
 	guild_id, err := a.guildId()
@@ -117,12 +118,22 @@ func (a *author) member() (*discordgo.Member, error) {
 		return nil, err
 	}
 
-	member, err := a.session.Member(guild_id, a.user.ID)
+	member, err := a.session.Member(guild_id, a.User.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	a.member_ = member
+	a.Member_ = member
 
 	return member, nil
+}
+
+func AuthorMarshaler(data []byte) (queue.Queueable, error) {
+	a := &author{}
+	err := json.Unmarshal(data, a)
+	if err != nil {
+		return nil, err
+	}
+
+	return a, nil
 }

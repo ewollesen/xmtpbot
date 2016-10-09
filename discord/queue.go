@@ -42,8 +42,19 @@ func (b *bot) dequeue(cmd Command) (err error) {
 	}
 
 	queueable, err := q.Remove(cmd.Author().Key())
-	if err != nil && !queue.NotFoundError.Contains(err) {
-		return cmd.Reply("Error removing %s from the queue: %s",
+	if err != nil {
+		if queue.NotFoundError.Contains(err) {
+			btag, err := cmd.Author().BattleTag()
+			if err != nil {
+				return cmd.Reply("Error removing %s from the scrimmages queue: %s",
+					cmd.Author().Nick(), err)
+			}
+			return cmd.Reply("BattleTag %q wasn't found in the "+
+				"scrimmages queue.", btag)
+		}
+	}
+	if err != nil {
+		return cmd.Reply("Error removing %s from the scrimmages queue: %s",
 			cmd.Author().Nick(), err)
 	}
 

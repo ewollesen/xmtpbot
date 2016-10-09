@@ -24,9 +24,11 @@ import (
 	"github.com/spacemonkeygo/flagfile"
 	"github.com/spacemonkeygo/spacelog"
 	spacelog_setup "github.com/spacemonkeygo/spacelog/setup"
+	redis "gopkg.in/redis.v4"
 	"xmtp.net/xmtpbot/discord"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/http_status"
+	"xmtp.net/xmtpbot/queue"
 	"xmtp.net/xmtpbot/remind"
 	seen_setup "xmtp.net/xmtpbot/seen/setup"
 	urls_setup "xmtp.net/xmtpbot/urls/setup"
@@ -35,6 +37,8 @@ import (
 var (
 	configDir = flag.String("config_dir", os.ExpandEnv("$HOME/.zenbeta"),
 		"directory in which to store config and state")
+	redisAddr = flag.String("discord.redis_addr", "localhost:6379",
+		"address of redis server")
 	defaultFlagfile = path.Join(*configDir, "config")
 
 	logger = spacelog.GetLoggerNamed("zenbeta")
@@ -49,6 +53,9 @@ func main() {
 	shutdown := make(chan bool)
 	http_server := http_server.New()
 	http_status := http_status.New(http_server)
+	redis_client := redis.NewClient(&redis.Options{Addr: *redisAddr, DB: 2})
+	queues := queue.NewRedisManager("discord.zenbeta", redis_client,
+		discord.AuthorMarshaler)
 	var wg sync.WaitGroup
 
 	discord_bot := discord.New(
@@ -58,7 +65,8 @@ func main() {
 		remind.New(),
 		nil,
 		http_server,
-		http_status)
+		http_status,
+		queues)
 	logger.Errore(discord_bot.Run(shutdown, &wg))
 	logger.Errore(http_status.Run(shutdown, &wg))
 
