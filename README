@@ -1,7 +1,10 @@
 xMTP bot
 
-A silly bot for Discord and Twitch.
+A silly bot for Slack, Discord, and Twitch.
 
 It does silly things, read the source.
 
 Copyright 2016 Eric A Wollesen
+
+If you're looking for the Zenyatta bot that resides on the Affinity Coaching
+Discord server, it's been moved here: https://github.com/ewollesen/zenbot
