@@ -28,9 +28,8 @@ import (
 )
 
 var (
+	Error  = errors.NewClass("http_status")
 	logger = spacelog.GetLogger()
-
-	Error = errors.NewClass("slack")
 )
 
 type StatusHandlerFunc func() map[string]string
