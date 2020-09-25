@@ -32,6 +32,7 @@ import (
 	"xmtp.net/xmtpbot/html"
 	"xmtp.net/xmtpbot/http_server"
 	"xmtp.net/xmtpbot/http_status"
+	"xmtp.net/xmtpbot/m8b"
 	"xmtp.net/xmtpbot/mildred"
 	"xmtp.net/xmtpbot/seen"
 	"xmtp.net/xmtpbot/urls"
@@ -72,6 +73,7 @@ func New(urls_store urls.Store, seen_store seen.Store, mildred mildred.Conn,
 		last_activity: time.Now(),
 	}
 
+	b.RegisterCommand("8ball", simpleCommand(m8b.Ask, "ask the Magic 8-Ball"))
 	b.RegisterCommand("commands", simpleCommand(b.listCommands,
 		"list available commands"))
 	b.RegisterCommand("faq", staticCommand("No FAQs answered yet",
